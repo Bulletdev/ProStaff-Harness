@@ -1,0 +1,50 @@
+name: psh
+
+on:
+  push:
+    paths: ["psh/**", ".github/workflows/psh.yml"]
+  pull_request:
+    paths: ["psh/**", ".github/workflows/psh.yml"]
+
+defaults:
+  run:
+    working-directory: psh
+
+jobs:
+  check:
+    # R11.4 pede a matriz Linux + macOS na v1.0; ela ja entra aqui porque o
+    # custo de manter e zero e o custo de descobrir divergencia depois nao e.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.9"
+
+      - run: bun install --frozen-lockfile
+
+      - name: typecheck
+        run: bun run typecheck
+
+      # R2.14: new RegExp recebendo variavel derruba o build.
+      - name: verificacao estatica de path em regex
+        run: bun run lint:regex
+
+      # R11.2c: todo arquivo em tests/ roda por glob, nunca por lista enumerada.
+      - name: testes
+        run: bun test --coverage
+
+      - name: binario
+        run: bun run build
+
+      # O proprio binario precisa responder fora do runner de teste: as falhas
+      # mais provaveis (instalacao incompleta) sao as que impedem o diagnostico
+      # de rodar de dentro (R10.2b).
+      - name: fumaca do binario
+        run: |
+          ./dist/psh --version
+          ./dist/psh help
