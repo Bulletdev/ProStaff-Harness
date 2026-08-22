@@ -5,11 +5,13 @@ CLI mínima e o adapter `ci`.
 
 Os identificadores no formato `R1.1`, `R2.4` e afins apontam para a
 especificação interna do projeto.
+
 Ficam aqui como âncora de rastreabilidade, e o texto ao lado sempre explica o
 que cada um exige.
 
 O que o marco resolve, em uma frase: **nenhum valor de portão vem de quem está
 sendo avaliado.**
+
 O agente não executa verificador, não escreve evidência, não passa métrica por
 argumento e não consegue reaproveitar um teste antigo depois de continuar
 editando.
@@ -36,20 +38,27 @@ fecha sozinho:
 ## Fora do escopo da v0.1, e declarado como tal
 
 - **C3, motor de fronteira.**
+  
   Entra na v0.2.
+  
   Até lá, `psh doctor` e `psh status` dizem `fronteira ausente`, e o adapter
   `ci` devolve `boundary_engine: absent` no relatório.
+  
   O R2.6b, que torna evidência e review inalcançáveis por agente, hoje é
   convenção e não mecanismo.
+  
   O código diz isso em vez de sugerir garantia.
 
 - **Sandbox real.**
+  
   O contrato do R2.7 está implementado: rede desligada por padrão, opt-in
   declarado por verificador e credencial de agente não montada.
+  
   Mas sem `ai-jail` instalado o modo é `degraded`, declarado no `psh status`, no
   `psh doctor` e dentro de **cada registro de evidência**.
 
 - **C5 a C9, e o C11 além de cobertura.**
+  
   Marcos seguintes.
 
 ## Instalação e uso
@@ -71,8 +80,10 @@ psh adapter ci --json          # verify + gate + advance, headless
 ```
 
 `psh init` é não destrutivo.
+
 Mostra o plano, faz backup do que sobrescreve e só escreve dentro de
 `.harness/`.
+
 `--dry-run` imprime o plano e sai.
 
 ## Como um portão decide
@@ -103,6 +114,7 @@ $ echo $?
 ```
 
 A recusa é explícita de propósito.
+
 Se fosse tratada como "flag desconhecida", o caminho nunca apareceria em teste e
 ninguém saberia se a garantia existe.
 
@@ -121,63 +133,89 @@ ninguém saberia se a garantia existe.
 ## Decisões que valem registro
 
 **Threshold mora em um lugar só.**
+
 O `min` fica no check do portão, nunca no verificador.
+
 O contrato não tem onde declarar o mesmo número duas vezes com valores
 diferentes (O9).
 
 **`success_exit_codes` é declarado, nunca inferido.**
+
 `npm audit` sai com 1 quando acha vulnerabilidade, e isso é resultado, não
 falha.
+
 Em vez de deduzir isso do texto da saída, o contrato declara `[0, 1]`.
+
 O código de saída continua sendo a autoridade (R2.10b); o que muda é qual código
 significa sucesso.
 
 **Sinal nunca vira zero.**
+
 `res.status ?? null`, jamais `?? 0`.
+
 Processo morto por timeout ou por sinal é falha.
+
 O atalho `?? 0` transforma `SIGTERM` em sucesso silencioso, e um portão que
 aprova por causa disso é pior que portão nenhum.
+
 Há teste para o caminho nos três modos de sandbox.
 
 **Fase terminal é declarada.**
+
 Uma máquina de estados que infere "é o fim" de um `next` que não resolve esconde
 erro de digitação até a hora de transitar.
+
 O contrato exige `"terminal": true`, e um `next` apontando para fase inexistente
 derruba o carregamento em vez de virar surpresa em runtime (R1.5b).
 
 **Portão vazio não vira portão aberto.**
+
 Quando `psh init` poda os checks de uma fase porque a stack não tem aquele
 verificador, o portão vira aprovação humana declarada.
+
 O plano diz quantos checks examinou e quantos podou.
 
 **Enumeração da árvore é declarada.**
+
 Com Git, `git ls-files -c -o --exclude-standard` respeita o `.gitignore`.
+
 Sem Git, caminhada.
+
 Com `.git/` presente mas `git` indisponível, o modo é `walk-fallback` e o
 `psh doctor` reprova.
+
 Sem isso, arquivo ignorado entraria no hash e evidência válida viraria obsoleta
 sozinha.
 
 **Contagem de candidatos em toda varredura (R2.13).**
+
 Extrator de métrica, `spec-coverage`, varredura de segredo, verificação de
 trilha e o próprio `check-no-path-regex` reportam quantos candidatos
 examinaram.
+
 Zero achados com zero candidatos é erro de configuração, não resultado limpo.
 
 **Contrato composto não compartilha objeto com os JSON embarcados.**
+
 Perfis e stack packs são módulos JSON, ou seja, singletons do processo.
+
 `psh init` copia antes de devolver: sem isso, qualquer mutação a jusante
 corromperia todo `init` seguinte no mesmo processo.
+
 Achado durante a validação da v0.1, com teste de regressão.
 
 **Flag booleana não consome o token seguinte.**
+
 `psh audit --json log` fazia `--json` engolir `log`, o subcomando sumia e o
 comando caía no default sem avisar.
+
 Também achado na validação, também com teste de regressão.
 
 **Caminho nunca vira expressão regular (R2.14).**
+
 Casamento por `Bun.Glob` com o caminho sempre do lado da entrada, comparação de
 contenção por API de path, e JSON Pointer no lugar de regex sobre relatório.
+
 `bun run lint:regex` reprova o build se algum `new RegExp` receber qualquer
 coisa que não seja literal constante.
 
@@ -220,17 +258,21 @@ Cobertura de linha nos módulos que o R11.1 exige em 85%:
 | `gate/evaluate.ts`      | 93%    |
 
 Nos demais módulos o piso é 70%, e o menor é `util/self.ts` com 71%.
+
 São 236 testes e 1 declarado como `skip`, com média geral de 94% de linha.
 
 **Todo arquivo de `src/` aparece na medição.**
+
 A CLI é exercitada em processo, com a saída desviada por `cli/io.ts`, e não só
 por subprocesso.
+
 Teste por subprocesso passa no CI mas não entra no relatório de cobertura, então
 o código pareceria testado sem que ninguém soubesse quanto dele roda de fato.
 
 Todo perfil (`strict`, `lean`, `gate-only`) cruzado com todo stack pack (`node`,
 `bun`, `ruby`, `python`, `go`, `generic`) passa pelo loader real em teste, o que
 dá 18 combinações.
+
 Sem isso, um erro em `ruby.json` só apareceria na máquina de quem rodasse
 `psh init` com aquela combinação.
 
@@ -253,5 +295,7 @@ Um `bun` instalado por snap roda confinado e não enxerga o `git` do sistema.
 
 Nesse caso o frescor cai para caminhada e o `.gitignore` deixa de ser
 respeitado.
+
 O `psh doctor` reprova com `workspace-enum` quando isso acontece.
+
 O binário compilado por `bun run build` não tem essa limitação.

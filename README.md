@@ -40,6 +40,7 @@
 ## O problema
 
 Um agente de código que reporta a própria nota não está sendo avaliado.
+
 Está se autodeclarando aprovado.
 
 O padrão aparece sempre da mesma forma:
@@ -50,6 +51,7 @@ harness: portão aprovado
 ```
 
 Ninguém rodou nada.
+
 O número veio do modelo.
 
 E mesmo quando o teste roda de verdade, nada impede continuar editando o código
@@ -59,8 +61,10 @@ O `psh` fecha esses dois buracos.
 
 O portão lê **exclusivamente** registros de evidência que o próprio núcleo
 produziu.
+
 Cada registro carrega o hash da árvore de arquivos que estava no disco no
 momento da verificação.
+
 Editou depois, a evidência vence.
 
 ```
@@ -72,6 +76,7 @@ $ echo $?
 ```
 
 A recusa é explícita de propósito.
+
 Tratada como "flag desconhecida", o caminho nunca apareceria em teste e ninguém
 saberia se a garantia existe.
 
@@ -134,6 +139,7 @@ Isolamento de execução é opcional e usa o
 [ai-jail](https://github.com/akitaonrails/ai-jail) 0.10.0 ou superior.
 
 Sem ele o `psh` roda em modo degradado.
+
 O modo é **declarado** no `psh status`, no `psh doctor` e dentro de cada
 registro de evidência, nunca silencioso.
 
@@ -151,8 +157,10 @@ psh doctor                # diagnóstico completo
 ```
 
 `psh init` é não destrutivo.
+
 Mostra o plano, faz backup do que sobrescrever e só escreve dentro de
 `.harness/`.
+
 Use `--dry-run` para ver o plano sem aplicar nada.
 
 ```
@@ -205,7 +213,9 @@ O que isso impede, na prática:
 ## 04 · Contrato de workflow
 
 Fases, portões e verificadores ficam em `.harness/workflow.json`.
+
 O arquivo é validado contra JSON Schema no carregamento.
+
 Contrato inválido é falha fatal, nunca aviso.
 
 ```json
@@ -244,11 +254,13 @@ Contrato inválido é falha fatal, nunca aviso.
 ```
 
 O threshold mora em um lugar só: no check do portão, nunca no verificador.
+
 O contrato não tem onde declarar o mesmo número duas vezes com valores
 diferentes.
 
 Fase terminal é declarada com `"terminal": true`, nunca inferida de um `next`
 vazio.
+
 Um `next` que aponta para fase inexistente derruba o carregamento, em vez de
 virar erro em runtime quando já é tarde.
 
@@ -279,6 +291,7 @@ O adapter verifica, avalia o portão e decide a transição em uma chamada, sem
 TTY e sem interação.
 
 Ele não oferece `--force`.
+
 Override é ato humano com confirmação, e CI não tem humano para confirmar.
 
 ```json
@@ -295,6 +308,7 @@ Override é ato humano com confirmação, e CI não tem humano para confirmar.
 ```
 
 `--gate-only` avalia sem mexer no estado.
+
 `--skip-verify` reaproveita evidência existente em vez de reverificar.
 
 ---
@@ -305,16 +319,21 @@ Esta seção existe porque um harness que promete garantia que não tem é pior 
 não ter harness nenhum.
 
 - **Não impede um agente de escrever em `.harness/evidence/`.**
+  
   Isso depende do motor de fronteira, que entra na 0.2.
+  
   Hoje a proteção é convenção, não mecanismo, e o `psh doctor` declara
   `fronteira ausente` em vez de sugerir o contrário.
 
 - **Não exige sandbox.**
+  
   O contrato de isolamento está implementado, mas sem `ai-jail` instalado o
   modo é `degraded`.
+  
   Isso aparece no estado, no diagnóstico e em cada registro de evidência.
 
 - **Não gerencia modelo, custo ou memória entre sessões.**
+  
   Marcos posteriores.
 
 ---
@@ -342,6 +361,7 @@ bun run build      # binário único
 Regras da suíte de testes:
 
 - Todo arquivo em `tests/` roda por glob, nunca por lista enumerada.
+  
   Teste que não roda é pior que teste ausente, porque cria confiança.
 - Nenhum teste escreve no diretório de trabalho nem toca no Git da árvore real.
 - Cobertura de linha acima de 85% em `audit` e em `evidence`, acima de 70% no
@@ -368,6 +388,7 @@ Regras da suíte de testes:
 
 O `ai-jail` é GPL-3.0 e entra como **dependência externa invocada como
 processo**, nunca linkada: o `psh` monta um argv e executa o binário.
+
 Não há obra derivada, e as duas licenças convivem.
 
 ---
@@ -382,6 +403,6 @@ Não há obra derivada, e as duas licenças convivem.
 
 <div align="center">
 
-Parte do ecossistema **[ProStaff](https://github.com/Bulletdev)**
+Parte do ecossistema **[ProStaff](https://github.com/prostaffgg/)**
 
 </div>
