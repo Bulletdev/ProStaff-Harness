@@ -177,16 +177,15 @@ const BOUNDARY_SEED = {
   _type: "psh-boundary",
   version: 1,
   description:
-    "Allowlist do projeto. Escrita humana via 'psh boundary' (C3, v0.2). Ate la o motor de fronteira nao esta ativo e 'psh doctor' declara isso.",
-  deny_always: [
-    ".harness/evidence/**",
-    ".harness/reviews/**",
-    ".harness/audit/**",
-    ".harness/state.json",
-    ".harness/boundary.json",
-    ".harness/harness.db",
-  ],
-  agents: {},
+    "Allowlist de escrita por agente. Alterar e acao humana via 'psh boundary add'. O deny duro (evidencia, review, trilha, state, esta allowlist e o diretorio de instalacao) mora no binario e nao pode ser liberado daqui.",
+  default_agent: "default",
+  agents: {
+    default: {
+      description:
+        "Fronteira ampla ate ser estreitada. Estreite com 'psh boundary add' e um agente por area, por exemplo backend em src/api/**.",
+      write: ["**"],
+    },
+  },
 };
 
 export function applyPlan(plan: InitPlan, opts: { backup: boolean }): Layout {

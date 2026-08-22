@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -86,6 +86,19 @@ export function harnessWith(layout: Layout, contract: Partial<WorkflowContract> 
 
   const workflow = parseWorkflow(full, "<test>");
   writeFileSync(layout.workflowPath, JSON.stringify(full, null, 2));
+  // Todo projeto real nasce com allowlist: o `psh init` sempre escreve uma.
+  // Sem isso o teste exercitaria o caminho de "allowlist ausente" sem querer.
+  if (!existsSync(layout.boundaryPath)) {
+    writeFileSync(
+      layout.boundaryPath,
+      JSON.stringify({
+        _type: "psh-boundary",
+        version: 1,
+        default_agent: "default",
+        agents: { default: { write: ["**"] } },
+      }),
+    );
+  }
   writeState(layout, initialState(full.profile, workflow.entryPhase));
 
   const db = new HarnessDb(layout.dbPath);

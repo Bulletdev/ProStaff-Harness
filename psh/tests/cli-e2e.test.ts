@@ -150,7 +150,8 @@ describe("CLI: init, doctor e recusa de flag desconhecida", () => {
 
     const status = psh(layout, ["status"]);
     expect(status.out).toContain("perfil        lean");
-    expect(status.out).toContain("fronteira     ausente");
+    expect(status.out).toContain("fronteira     degradado");
+    expect(status.out).toContain("revertida por snapshot");
   });
 
   test("init em stack sem verificador automatico troca o portao por aprovacao humana, e diz isso", () => {
@@ -163,11 +164,12 @@ describe("CLI: init, doctor e recusa de flag desconhecida", () => {
     expect(kinds).toContain("user-approval");
   });
 
-  test("doctor declara o modo degradado e a ausencia do motor de fronteira", () => {
+  test("doctor declara que a fronteira existe mas esta em modo degradado", () => {
     const layout = projetoDeAceite();
     const r = psh(layout, ["doctor"]);
     expect(r.out).toContain("boundary");
-    expect(r.out).toContain("C3 entra na v0.2");
+    expect(r.out).toContain("modo degradado");
+    expect(r.out).toContain("revertida");
     expect(r.out).toContain("audit");
   });
 

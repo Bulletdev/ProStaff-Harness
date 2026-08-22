@@ -47,6 +47,16 @@ function projeto(over: Partial<WorkflowContract> = {}, opts: { git?: boolean } =
   };
   harnessWith(layout, contrato).close();
   writeFileSync(join(layout.harness, ".gitignore"), "harness.db\nevidence/\naudit/\n");
+  writeFile(
+    layout,
+    ".harness/boundary.json",
+    JSON.stringify({
+      _type: "psh-boundary",
+      version: 1,
+      default_agent: "backend",
+      agents: { backend: { write: ["src/**"] } },
+    }),
+  );
   return layout;
 }
 
@@ -60,7 +70,8 @@ describe("psh doctor (R10.2, R10.2b)", () => {
       const report = runDoctor(ctx);
       expect(acha(report.checks, "sandbox").level).toBe("warn");
       expect(acha(report.checks, "sandbox").message).toContain("DEGRADADO");
-      expect(acha(report.checks, "boundary").message).toContain("v0.2");
+      expect(acha(report.checks, "boundary").message).toContain("modo degradado");
+      expect(acha(report.checks, "boundary").detail).toContain("revertida");
       expect(renderDoctor(report)).toContain("avisos");
     } finally {
       ctx.close();

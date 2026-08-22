@@ -4,6 +4,7 @@ import { delimiter, isAbsolute, join } from "node:path";
 import type { ProjectContext } from "./context.ts";
 import { detectSandbox } from "../evidence/sandbox.ts";
 import { probeGit } from "../evidence/workspace.ts";
+import { defaultInstallDirs, loadBoundary } from "../boundary/policy.ts";
 import { PSH_TOKEN } from "../util/self.ts";
 import { PSH_VERSION } from "../version.ts";
 
@@ -28,7 +29,7 @@ export function runDoctor(ctx: ProjectContext): DoctorReport {
   const checks: Check[] = [];
 
   checks.push(checkSandbox());
-  checks.push(checkBoundaryEngine());
+  checks.push(...checkBoundaryEngine(ctx));
   checks.push(checkEnumeration(ctx));
   checks.push(checkAudit(ctx));
   checks.push(...checkVerifierExecutables(ctx));
@@ -62,14 +63,64 @@ function checkSandbox(): Check {
   };
 }
 
-function checkBoundaryEngine(): Check {
-  return {
-    id: "boundary",
-    level: "warn",
-    message: "motor de fronteira ausente (C3 entra na v0.2)",
-    detail:
-      "R2.6b depende do boundary para tornar .harness/evidence e .harness/reviews inalcancaveis por agente. Na v0.1 a protecao e por convencao, nao por mecanismo.",
-  };
+/** C3 ativo: o diagnostico passa a dizer o estado real da fronteira. */
+function checkBoundaryEngine(ctx: ProjectContext): Check[] {
+  const out: Check[] = [];
+  let policy;
+  try {
+    policy = loadBoundary(ctx.layout);
+  } catch (cause) {
+    return [
+      {
+        id: "boundary",
+        level: "fail",
+        message: "allowlist ausente ou invalida: toda escrita de agente fica bloqueada",
+        detail: (cause as Error).message,
+      },
+    ];
+  }
+
+  const sandbox = detectSandbox();
+  out.push(
+    sandbox.mode === "ai-jail"
+      ? { id: "boundary", level: "ok", message: "fronteira aplicada por mount do ai-jail (o kernel impede a escrita)" }
+      : {
+          id: "boundary",
+          level: "warn",
+          message: "fronteira em modo degradado: reversao por snapshot, nao bloqueio",
+          detail:
+            "Sem ai-jail a escrita fora da fronteira acontece e depois e revertida. Detectavel e reversivel, mas nao impedida. Instale o ai-jail para o controle real (R3.1).",
+        },
+  );
+
+  // R3.5b: nenhum mapeamento de escrita pode alcancar o diretorio de instalacao.
+  const instalacao = defaultInstallDirs();
+  const amplos: string[] = [];
+  for (const id of policy.agentIds) {
+    const agente = policy.contract.agents[id]!;
+    for (const dir of instalacao) {
+      const d = policy.canWrite(id, join(dir, "psh"));
+      if (d.allowed) {
+        out.push({
+          id: `boundary:${id}`,
+          level: "fail",
+          message: `o agente '${id}' alcanca o diretorio de instalacao (${dir})`,
+          detail: "Um agente nunca pode reescrever o mecanismo que o restringe (R3.5b).",
+        });
+      }
+    }
+    if (agente.write.includes("**")) amplos.push(id);
+  }
+  if (amplos.length > 0) {
+    out.push({
+      id: "boundary:amplitude",
+      level: "warn",
+      message: `fronteira nao estreitada para: ${amplos.join(", ")}`,
+      detail:
+        "Agente com write '**' escreve em qualquer lugar fora do deny duro. Use 'psh boundary add' com um agente por area.",
+    });
+  }
+  return out;
 }
 
 function checkAudit(ctx: ProjectContext): Check {

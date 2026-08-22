@@ -2,6 +2,7 @@ import type { ProjectContext } from "./context.ts";
 import { currentAttempt } from "./context.ts";
 import { detectSandbox } from "../evidence/sandbox.ts";
 import { evaluateGate, type GateResult } from "../gate/evaluate.ts";
+import { loadBoundary } from "../boundary/policy.ts";
 
 export interface StatusReport {
   profile: string;
@@ -12,10 +13,25 @@ export interface StatusReport {
   max_auto_retries: number | null;
   status: string;
   sandbox: { mode: string; detail: string };
-  boundary_engine: "ausente (C3 entra na v0.2)";
+  boundary: { mode: "mount" | "degradado" | "indisponivel"; agents: number; detail: string };
   gate: GateResult | null;
   audit: { ok: boolean; entries: number; problems: number };
   history: { phase: string; attempt: number; verdict: string; at: string }[];
+}
+
+function descreverFronteira(ctx: ProjectContext, modo: string): StatusReport["boundary"] {
+  try {
+    const policy = loadBoundary(ctx.layout);
+    return modo === "ai-jail"
+      ? { mode: "mount", agents: policy.agentIds.length, detail: "escrita restrita pelo kernel via ai-jail" }
+      : {
+          mode: "degradado",
+          agents: policy.agentIds.length,
+          detail: "escrita fora da fronteira e revertida por snapshot, nao impedida",
+        };
+  } catch (cause) {
+    return { mode: "indisponivel", agents: 0, detail: (cause as Error).message };
+  }
 }
 
 export function buildStatus(ctx: ProjectContext): StatusReport {
@@ -35,7 +51,7 @@ export function buildStatus(ctx: ProjectContext): StatusReport {
     max_auto_retries: phase?.on_failure.max_auto_retries ?? null,
     status: ctx.state.status,
     sandbox: { mode: sandbox.mode, detail: sandbox.detail },
-    boundary_engine: "ausente (C3 entra na v0.2)",
+    boundary: descreverFronteira(ctx, sandbox.mode),
     gate:
       phase === undefined
         ? null
@@ -57,7 +73,8 @@ export function renderStatus(report: StatusReport): string {
     `sandbox       ${report.sandbox.mode}${report.sandbox.mode === "degraded" ? "  <-- MODO DEGRADADO" : ""}`,
   );
   lines.push(`              ${report.sandbox.detail}`);
-  lines.push(`fronteira     ${report.boundary_engine}`);
+  lines.push(`fronteira     ${report.boundary.mode} (${report.boundary.agents} agente(s))`);
+  lines.push(`              ${report.boundary.detail}`);
   lines.push(
     `trilha        ${report.audit.ok ? "integra" : "COMPROMETIDA"} (${report.audit.entries} entradas, ${report.audit.problems} problemas)`,
   );
