@@ -67,6 +67,21 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # Vem antes de tudo de proposito: se um passo posterior falhar, ainda
+      # assim ficou registrado o que este kernel oferece. A tabela de
+      # plataformas do README sai daqui, de medicao, nao de suposicao.
+      - name: capacidades do kernel do WSL2
+        run: |
+          echo "kernel:     $(uname -sr)"
+          echo "userns:     $(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo '(sem sysctl)')"
+          echo "landlock:   $(grep -c landlock /proc/kallsyms 2>/dev/null || echo 0) simbolos em kallsyms"
+          echo "bwrap:      $(bwrap --version 2>/dev/null || echo AUSENTE)"
+          if bwrap --ro-bind / / --dev /dev -- true 2>/dev/null; then
+            echo "bwrap real: funciona"
+          else
+            echo "bwrap real: falhou"
+          fi
+
       # Sem `curl | sh`: baixa o release e confere o checksum publicado.
       # O proprio harness bloqueia esse padrao nos agentes, e instalar assim
       # aqui seria incoerente.
@@ -75,22 +90,16 @@ jobs:
           set -euo pipefail
           V=1.3.9
           base="https://github.com/oven-sh/bun/releases/download/bun-v${V}"
-          curl -fsSL -o /tmp/bun.zip "${base}/bun-linux-x64.zip"
-          curl -fsSL -o /tmp/SHASUMS256.txt "${base}/SHASUMS256.txt"
-          ( cd /tmp && grep ' bun-linux-x64.zip$' SHASUMS256.txt | sha256sum -c - )
-          unzip -q -o /tmp/bun.zip -d /tmp
+          # O nome baixado precisa bater com o que o SHASUMS256.txt lista, senao
+          # o `sha256sum -c` procura um arquivo que nao existe e reprova sem que
+          # nada esteja errado com o download.
+          ( cd /tmp \
+            && curl -fsSL -O "${base}/bun-linux-x64.zip" \
+            && curl -fsSL -O "${base}/SHASUMS256.txt" \
+            && grep ' bun-linux-x64.zip$' SHASUMS256.txt | sha256sum -c - )
+          unzip -q -o /tmp/bun-linux-x64.zip -d /tmp
           sudo install /tmp/bun-linux-x64/bun /usr/local/bin/bun
           bun --version
-
-      # O que este ambiente consegue de fato. O resultado entra no log para que
-      # a tabela de plataformas do README seja escrita a partir de medicao.
-      - name: capacidades do kernel do WSL2
-        run: |
-          echo "kernel:     $(uname -sr)"
-          echo "userns:     $(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo '(sem sysctl)')"
-          echo "landlock:   $(grep -c landlock /proc/kallsyms 2>/dev/null || echo 0) simbolos"
-          echo "bwrap:      $(bwrap --version 2>/dev/null || echo AUSENTE)"
-          echo "bwrap real: $(bwrap --ro-bind / / --dev /dev -- true 2>&1 && echo funciona || echo falhou)"
 
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
