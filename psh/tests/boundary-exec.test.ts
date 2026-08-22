@@ -52,10 +52,16 @@ function conteudo(layout: Layout, rel: string): string {
  * nenhuma das vias. Cada via e um caso do R11.2 numero 1.
  */
 describe("R11.2 caso 1: escrita fora da fronteira por cada via", () => {
+  // BSD sed (macOS) exige sufixo de backup no -i; GNU sed nao aceita o sufixo
+  // vazio da mesma forma. Testar a ferramenta de verdade em vez de trocar por
+  // um equivalente portatil, porque `sed -i` e uma das vias nomeadas no criterio
+  // de aceite.
+  const SED_INPLACE = process.platform === "darwin" ? "sed -i ''" : "sed -i";
+
   const vias: [string, string][] = [
     ["redirecionamento", "echo invadido > src/web/app.tsx"],
     ["append por redirecionamento", "echo invadido >> src/web/app.tsx"],
-    ["sed -i", "sed -i 's/web original/invadido/' src/web/app.tsx"],
+    ["sed -i", `${SED_INPLACE} 's/web original/invadido/' src/web/app.tsx`],
     ["cp", "cp src/api/users.ts src/web/app.tsx"],
     ["mv", "mv src/api/users.ts src/web/app.tsx"],
     ["tee", "echo invadido | tee src/web/app.tsx >/dev/null"],
