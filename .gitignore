@@ -1,0 +1,61 @@
+# ==========================================
+#  Dependencias e build
+# ==========================================
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# ==========================================
+#  Segredo. Nada de credencial versionada (G5).
+# ==========================================
+.env
+.env.*
+!.env.example
+
+# ==========================================
+#  DEVDOCS - documentacao interna
+#  PRD, diagnostico consolidado, feedback e notas de trabalho.
+#  Mesmo padrao do prostaff-api.
+# ==========================================
+/DEVDOCS
+
+# ==========================================
+#  Checkouts externos. Nao sao nosso codigo.
+#    ai-jail            -> github.com/akitaonrails/ai-jail (GPL-3.0)
+#    harnes-opencode    -> harness de referencia, usado no diagnostico
+#    promptfoo-demo-evals -> exemplos do promptfoo
+#  A versao minima exigida do ai-jail esta no README.
+# ==========================================
+/ai-jail
+/harnes-opencode
+/promptfoo-demo-evals
+
+# ==========================================
+#  Artefato de execucao do harness
+# ==========================================
+.harness/harness.db
+.harness/harness.db-wal
+.harness/harness.db-shm
+.harness/evidence/
+.harness/audit/
+.harness/approvals/
+
+# ==========================================
+#  Saida de eval e rascunho
+# ==========================================
+evals/results.json
+evals/results.csv
+evals/smoke-results.json
+evals/.promptfoo/
+.verificacao/
+
+# ==========================================
+#  Sistema operacional e editor
+# ==========================================
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
