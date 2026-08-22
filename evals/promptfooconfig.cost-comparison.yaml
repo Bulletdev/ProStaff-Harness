@@ -1,0 +1,340 @@
+# promptfooconfig.cost-comparison.yaml
+#
+# Objetivo: comparar CUSTO, LATENCIA e QUALIDADE entre diferentes LLMs
+# rodando a mesma tarefa (grading de resposta de aluno).
+#
+# Como rodar:
+#   npx promptfoo eval -c promptfooconfig.cost-comparison.yaml --repeat 3
+#   npx promptfoo view          # dashboard com custo/latencia/nota lado a lado
+#
+# Exportar para analise:
+#   npx promptfoo eval -c promptfooconfig.cost-comparison.yaml --repeat 3 -o results.json
+#   npx promptfoo eval -c promptfooconfig.cost-comparison.yaml --repeat 3 -o results.csv
+#
+# O CUSTO NAO E CALCULADO AQUI. Fica em prices.json + analyze-cost-comparison.js
+#
+# Verificado por execucao, nao por leitura de documentacao:
+#
+#  - A tabela de precos embutida no promptfoo 0.122.0, a versao mais recente
+#    publicada, nao conhece NENHUM modelo de geracao atual. Nem Claude 5, nem
+#    gpt-5-nano, nem gemini-3.x. Ela conhece Claude ate
+#    claude-sonnet-4-5-20250929.
+#  - As chaves `inputCost`/`outputCost` de provider so passaram a ser lidas em
+#    versao mais nova que a instalada. Na 0.120.x o codigo e
+#    `config.cost ?? model.cost.input`: escrever inputCost ali nao faz nada e
+#    nao avisa.
+#  - Com o modelo fora da tabela, o assert `cost` nao reprova: ele ABORTA o
+#    teste com "Cost assertion does not support providers that do not return
+#    cost", derrubando junto os asserts de formato e de nota. Um teste que
+#    deveria medir qualidade vira erro por causa do preco.
+#
+# Por isso o assert de custo saiu daqui. O custo e calculado depois, a partir
+# dos tokens que o promptfoo reporta e da tabela em prices.json, que e nossa,
+# versionada e com data de conferencia.
+#
+# ATENCAO TAMBEM:
+#
+# 1. Thinking muda a conta. Os modelos atuais da Anthropic (Sonnet 5, Opus 5)
+#    raciocinam por padrao, e os tokens de raciocinio sao cobrados como output.
+#    Isso e o que voce paga de verdade, entao esta certo medir assim, mas nao e
+#    a mesma tarefa que um gpt-4o-mini sem raciocinio esta fazendo. Ao comparar,
+#    olhe a coluna de qualidade junto com a de custo.
+
+description: "Comparacao de custo, latencia e qualidade entre LLMs na tarefa de grading"
+
+# ---------------------------------------------------------------------------
+# PROVIDERS
+#
+# Regra que custou caro descobrir: nos modelos atuais da Anthropic (Sonnet 5,
+# Opus 5, Opus 4.8/4.7 e Fable 5) os parametros de sampling foram REMOVIDOS.
+# Mandar `temperature` para eles devolve HTTP 400 e o provider inteiro sai da
+# comparacao. Sonnet 4.6, Haiku 4.5 e anteriores ainda aceitam.
+#
+# Outra: nunca colocar sufixo de data no id (`claude-sonnet-4-6`, nunca
+# `claude-sonnet-4-6-20251114`). Os ids abaixo sao completos como estao.
+# ---------------------------------------------------------------------------
+
+# Schema JSON da tarefa, reaproveitado pelos providers que sabem impor formato.
+# Sem isso, o assert `is-json` mede coisas diferentes em cada provider: nos que
+# tem modo JSON ele testa a API, nos outros testa se o modelo obedeceu o prompt.
+_gradingSchema: &gradingSchema
+  type: object
+  properties:
+    mark:
+      type: integer
+    mistakes:
+      type: array
+      items:
+        type: string
+  required: [mark, mistakes]
+  additionalProperties: false
+
+providers:
+  # --- OpenAI ---------------------------------------------------------------
+  # gpt-4o e gpt-4o-mini continuam ativos e sem marca de descontinuacao, mas sao
+  # a geracao anterior. Numa comparacao de CUSTO isso importa: o gpt-5-nano custa
+  # US$ 0.05 / US$ 0.40, contra US$ 0.15 / US$ 0.60 do 4o-mini. Sem ele na lista,
+  # a resposta para "qual e o mais barato" sai errada por 3x.
+  - id: openai:gpt-5-nano
+    label: "GPT-5-nano"
+    config:
+      temperature: 0.2
+      response_format:
+        type: json_object
+
+  - id: openai:gpt-4o-mini
+    label: "GPT-4o-mini"
+    config:
+      temperature: 0.2
+      response_format:
+        type: json_object
+
+  - id: openai:gpt-4o
+    label: "GPT-4o"
+    config:
+      temperature: 0.2
+      response_format:
+        type: json_object
+
+  # --- Anthropic ------------------------------------------------------------
+  # Haiku 4.5: US$ 1 / US$ 5 por milhao. Aceita temperature.
+  - id: anthropic:messages:claude-haiku-4-5
+    label: "Claude Haiku 4.5"
+    config:
+      temperature: 0.2
+      max_tokens: 1024
+      output_format:
+        type: json_schema
+        schema: *gradingSchema
+
+  # Sonnet 4.6: US$ 3 / US$ 15. Ainda aceita temperature.
+  - id: anthropic:messages:claude-sonnet-4-6
+    label: "Claude Sonnet 4.6"
+    config:
+      temperature: 0.2
+      max_tokens: 1024
+      output_format:
+        type: json_schema
+        schema: *gradingSchema
+
+  # Sonnet 5: US$ 3 / US$ 15 (intro US$ 2 / US$ 10 ate 2026-08-31).
+  # SEM temperature: sampling foi removido, mandar devolve 400.
+  - id: anthropic:messages:claude-sonnet-5
+    label: "Claude Sonnet 5"
+    config:
+      max_tokens: 4096 # raciocinio ocupa output; 1024 trunca
+      output_format:
+        type: json_schema
+        schema: *gradingSchema
+
+  # Opus 5: US$ 5 / US$ 25. Sem temperature, mesmo motivo.
+  # E o mais caro da lista de proposito: serve de teto para saber quanto do
+  # custo compra qualidade que os menores nao entregam.
+  - id: anthropic:messages:claude-opus-5
+    label: "Claude Opus 5"
+    config:
+      max_tokens: 4096
+      output_format:
+        type: json_schema
+        schema: *gradingSchema
+
+  # --- Google ---------------------------------------------------------------
+  # Os dois continuam ativos, e o 2.5-flash-lite (US$ 0.10 / US$ 0.40) ainda e a
+  # opcao mais barata do Google: o 3.5-flash-lite, mais novo, custa US$ 0.30 /
+  # US$ 2.50. Aqui "mais novo" nao quer dizer "mais barato", entao mantive os
+  # dois 2.5 de proposito.
+  #
+  # Se quiser a geracao atual na comparacao, adicione:
+  #   - id: google:gemini-3.7-flash    # US$ 0.75 / US$ 3.75
+  - id: google:gemini-2.5-flash-lite
+    label: "Gemini 2.5 Flash-Lite"
+    config:
+      generationConfig:
+        responseMimeType: "application/json"
+
+  - id: google:gemini-2.5-flash
+    label: "Gemini 2.5 Flash"
+    config:
+      generationConfig:
+        responseMimeType: "application/json"
+
+# ---------------------------------------------------------------------------
+# PROMPT: identico ao `createGradingPrompt` do llms.ts, para a comparacao valer
+# para a tarefa real do produto e nao para um benchmark generico.
+# ---------------------------------------------------------------------------
+prompts:
+  - label: grading-prompt
+    raw: |
+      ## System
+      You are an experienced language tutor.
+      ## User
+      Grade the following answer in {{language}} on a scale of 1 to 10.
+      Provide the grade as an integer under the key "mark" and list the
+      mistakes in English under the key "mistakes".
+
+      Answer:
+      "{{answer}}"
+
+      Response format (JSON):
+      {
+        "mark": integer,
+        "mistakes": ["mistake1", "mistake2", ...]
+      }
+
+# ---------------------------------------------------------------------------
+# defaultTest aplica formato, custo e latencia a todo teste, sem repetir.
+# ---------------------------------------------------------------------------
+defaultTest:
+  assert:
+    - type: is-json
+      value: *gradingSchema # valida o schema, nao so "e JSON"
+      metric: "Format"
+    - type: latency
+      threshold: 4000 # ms, ajuste a sua tolerancia de UX
+      metric: "Latencia"
+
+tests:
+- description: Spanish - correta
+  vars:
+    language: Spanish
+    answer: Hola, ¿cómo estás?
+  metadata:
+    language: Spanish
+    esperado: correta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length === 0) return true;
+return { pass: false, score: 0, reason: `frase correta, mas apontou ${r.mistakes.length} erro(s): ${JSON.stringify(r.mistakes).slice(0, 200)}` };
+
+      '
+    metric: Deteccao
+- description: Spanish - genero do artigo
+  vars:
+    language: Spanish
+    answer: La gato está en la casa.
+  metadata:
+    language: Spanish
+    esperado: incorreta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length >= 1) return true;
+return { pass: false, score: 0, reason: "frase tem erro conhecido e nenhum foi apontado" };
+
+      '
+    metric: Deteccao
+- description: French - correta
+  vars:
+    language: French
+    answer: Bonjour, comment ça va?
+  metadata:
+    language: French
+    esperado: correta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length === 0) return true;
+return { pass: false, score: 0, reason: `frase correta, mas apontou ${r.mistakes.length} erro(s): ${JSON.stringify(r.mistakes).slice(0, 200)}` };
+
+      '
+    metric: Deteccao
+- description: French - contracao au/a le
+  vars:
+    language: French
+    answer: Je suis allé à le magasin.
+  metadata:
+    language: French
+    esperado: incorreta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length >= 1) return true;
+return { pass: false, score: 0, reason: "frase tem erro conhecido e nenhum foi apontado" };
+
+      '
+    metric: Deteccao
+- description: German - correta
+  vars:
+    language: German
+    answer: Die Katze ist süß.
+  metadata:
+    language: German
+    esperado: correta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length === 0) return true;
+return { pass: false, score: 0, reason: `frase correta, mas apontou ${r.mistakes.length} erro(s): ${JSON.stringify(r.mistakes).slice(0, 200)}` };
+
+      '
+    metric: Deteccao
+- description: German - genero do artigo
+  vars:
+    language: German
+    answer: Der Katze ist süß.
+  metadata:
+    language: German
+    esperado: incorreta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length >= 1) return true;
+return { pass: false, score: 0, reason: "frase tem erro conhecido e nenhum foi apontado" };
+
+      '
+    metric: Deteccao
+- description: English - correta
+  vars:
+    language: English
+    answer: She goes to the market.
+  metadata:
+    language: English
+    esperado: correta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length === 0) return true;
+return { pass: false, score: 0, reason: `frase correta, mas apontou ${r.mistakes.length} erro(s): ${JSON.stringify(r.mistakes).slice(0, 200)}` };
+
+      '
+    metric: Deteccao
+- description: English - concordancia verbal
+  vars:
+    language: English
+    answer: She go to the market.
+  metadata:
+    language: English
+    esperado: incorreta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length >= 1) return true;
+return { pass: false, score: 0, reason: "frase tem erro conhecido e nenhum foi apontado" };
+
+      '
+    metric: Deteccao

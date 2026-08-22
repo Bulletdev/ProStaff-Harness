@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "Tabela de precos que ESTE harness usa, em US$ por 1 milhao de tokens.",
+    "",
+    "Por que nao usar a do promptfoo: a versao 0.122.0, a mais recente publicada",
+    "em 2026-08-22, nao conhece nenhum modelo de geracao atual (Claude 5,",
+    "gpt-5-nano, gemini-3.x). Conhece Claude ate claude-sonnet-4-5-20250929.",
+    "Sem preco na tabela o assert de custo aborta o teste inteiro.",
+    "",
+    "E por que nao usar inputCost/outputCost no YAML: essas chaves so passaram a",
+    "ser lidas em versao mais nova. Na 0.120.x o codigo e",
+    "`config.cost ?? model.cost.input`, entao escrever inputCost no config nao",
+    "faz nada e nao avisa.",
+    "",
+    "Aqui o preco fica em um lugar so, versionado, com data de conferencia.",
+    "Confira antes de qualquer rodada que va embasar decisao."
+  ],
+  "verifiedOn": "2026-08-22",
+  "unit": "USD per 1M tokens",
+  "models": {
+    "openai:gpt-5-nano":                    { "input": 0.05, "output": 0.40 },
+    "openai:gpt-4o-mini":                   { "input": 0.15, "output": 0.60 },
+    "openai:gpt-4o":                        { "input": 2.50, "output": 10.00 },
+
+    "anthropic:messages:claude-haiku-4-5":  { "input": 1.00, "output": 5.00 },
+    "anthropic:messages:claude-sonnet-4-6": { "input": 3.00, "output": 15.00 },
+    "anthropic:messages:claude-sonnet-5":   {
+      "input": 2.00,
+      "output": 10.00,
+      "note": "preco de introducao ate 2026-08-31; depois 3.00 / 15.00"
+    },
+    "anthropic:messages:claude-opus-5":     { "input": 5.00, "output": 25.00 },
+
+    "google:gemini-2.5-flash-lite":         { "input": 0.10, "output": 0.40 },
+    "google:gemini-2.5-flash":              { "input": 0.30, "output": 2.50 }
+  }
+}

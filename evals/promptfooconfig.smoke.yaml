@@ -1,0 +1,110 @@
+# Gerado a partir do promptfooconfig.cost-comparison.yaml.
+# Mesmo prompt, mesmos testes, mesmos thresholds; providers de mentira.
+# Prova o harness sem gastar chamada. Rodar: npm run eval:smoke
+
+description: Smoke test do harness, sem chamada de API.
+providers:
+- id: file://stub-provider.js
+  label: stub-bom
+  config:
+    modo: bom
+- id: file://stub-provider.js
+  label: stub-formato-quebrado
+  config:
+    modo: formato-quebrado
+- id: file://stub-provider.js
+  label: stub-nota-errada
+  config:
+    modo: nota-errada
+- id: file://stub-provider.js
+  label: stub-lento
+  config:
+    modo: bom
+    latenciaMs: 5000
+prompts:
+- label: grading-prompt
+  raw: "## System\nYou are an experienced language tutor.\n## User\nGrade the following answer in {{language}}\
+    \ on a scale of 1 to 10.\nProvide the grade as an integer under the key \"mark\" and list the\nmistakes\
+    \ in English under the key \"mistakes\".\n\nAnswer:\n\"{{answer}}\"\n\nResponse format (JSON):\n{\n\
+    \  \"mark\": integer,\n  \"mistakes\": [\"mistake1\", \"mistake2\", ...]\n}\n"
+defaultTest:
+  assert:
+  - type: is-json
+    value:
+      type: object
+      properties:
+        mark:
+          type: integer
+        mistakes:
+          type: array
+          items:
+            type: string
+      required:
+      - mark
+      - mistakes
+      additionalProperties: false
+    metric: Format
+  - type: latency
+    threshold: 4000
+    metric: Latencia
+tests:
+- description: Espanhol - resposta correta
+  vars:
+    language: Spanish
+    answer: "Hola, ¿cómo estás?"
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      return r.mark >= 9 && r.mark <= 10;
+
+      '
+    metric: Precisao da Nota
+- description: Espanhol - erro de genero (artigo/substantivo)
+  vars:
+    language: Spanish
+    answer: "La gato está en la casa."
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      return r.mark >= 2 && r.mark <= 5 && r.mistakes.length >= 1;
+
+      '
+    metric: Precisao da Nota
+- description: Frances - resposta correta
+  vars:
+    language: French
+    answer: "Bonjour, comment ça va?"
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      return r.mark === 10 && r.mistakes.length === 0;
+
+      '
+    metric: Precisao da Nota
+- description: Alemao - erro de concordancia de artigo
+  vars:
+    language: German
+    answer: "Der Katze ist süß."
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      return r.mark >= 2 && r.mark <= 5 && r.mistakes.length >= 1;
+
+      '
+    metric: Precisao da Nota
+- description: Ingles - erro de concordancia verbal
+  vars:
+    language: English
+    answer: She go to the market.
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      return r.mark >= 1 && r.mark <= 8 && r.mistakes.length >= 1;
+
+      '
+    metric: Precisao da Nota

@@ -1,0 +1,238 @@
+# Variante so com Anthropic, para rodar com uma chave so.
+#
+# Gerada a partir do promptfooconfig.cost-comparison.yaml: mesmo prompt, mesmos
+# casos, mesmos thresholds. Quando tiver as chaves de OpenAI e Google, use o
+# config completo em vez deste.
+#
+# Antes de rodar:
+#   export ANTHROPIC_API_KEY="sk-ant-..."     # NAO commite isso
+#
+# Rodar barato primeiro (1 repeticao, 20 chamadas):
+#   npx promptfoo eval -c promptfooconfig.anthropic-only.yaml --repeat 1 -o results.json
+#   node analyze-cost-comparison.js results.json
+#
+# Se estiver tudo certo, a rodada completa (3 repeticoes, 60 chamadas):
+#   npm run eval:anthropic && npm run analyze
+#
+# ESTIMATIVA DE GASTO da rodada completa, pela tabela em prices.json:
+#
+#   Haiku 4.5      15 chamadas   ~US$ 0.01
+#   Sonnet 4.6     15 chamadas   ~US$ 0.02
+#   Sonnet 5       15 chamadas   ~US$ 0.12   (raciocina por padrao)
+#   Opus 5         15 chamadas   ~US$ 0.57   (raciocina por padrao, output caro)
+#   ----------------------------------------
+#   total                        ~US$ 0.72
+#
+# O numero do Opus 5 domina porque output custa US$ 25 por milhao e o
+# raciocinio conta como output. Se quiser gastar menos na primeira rodada,
+# comente o bloco dele: os outros tres somam menos de US$ 0.05.
+
+description: Comparacao de custo, latencia e qualidade entre modelos Claude na tarefa de grading
+providers:
+- id: anthropic:messages:claude-haiku-4-5
+  label: Claude Haiku 4.5
+  config:
+    temperature: 0.2
+    max_tokens: 1024
+    output_format:
+      type: json_schema
+      schema: &id001
+        type: object
+        properties:
+          mark:
+            type: integer
+          mistakes:
+            type: array
+            items:
+              type: string
+        required:
+        - mark
+        - mistakes
+        additionalProperties: false
+- id: anthropic:messages:claude-sonnet-4-6
+  label: Claude Sonnet 4.6
+  config:
+    temperature: 0.2
+    max_tokens: 1024
+    output_format:
+      type: json_schema
+      schema: *id001
+- id: anthropic:messages:claude-sonnet-5
+  label: Claude Sonnet 5
+  config:
+    max_tokens: 4096
+    thinking:
+      type: adaptive
+    showThinking: false
+    output_format:
+      type: json_schema
+      schema: *id001
+- id: anthropic:messages:claude-opus-5
+  label: Claude Opus 5
+  config:
+    max_tokens: 4096
+    thinking:
+      type: adaptive
+    showThinking: false
+    output_format:
+      type: json_schema
+      schema: *id001
+prompts:
+- label: grading-prompt
+  raw: "## System\nYou are an experienced language tutor.\n## User\nGrade the following answer in {{language}}\
+    \ on a scale of 1 to 10.\nProvide the grade as an integer under the key \"mark\" and list the\nmistakes\
+    \ in English under the key \"mistakes\".\n\nAnswer:\n\"{{answer}}\"\n\nResponse format (JSON):\n{\n\
+    \  \"mark\": integer,\n  \"mistakes\": [\"mistake1\", \"mistake2\", ...]\n}\n"
+defaultTest:
+  assert:
+  - type: is-json
+    value: *id001
+    metric: Format
+  - type: latency
+    threshold: 4000
+    metric: Latencia
+tests:
+- description: Spanish - correta
+  vars:
+    language: Spanish
+    answer: Hola, ¿cómo estás?
+  metadata:
+    language: Spanish
+    esperado: correta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length === 0) return true;
+return { pass: false, score: 0, reason: `frase correta, mas apontou ${r.mistakes.length} erro(s): ${JSON.stringify(r.mistakes).slice(0, 200)}` };
+
+      '
+    metric: Deteccao
+- description: Spanish - genero do artigo
+  vars:
+    language: Spanish
+    answer: La gato está en la casa.
+  metadata:
+    language: Spanish
+    esperado: incorreta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length >= 1) return true;
+return { pass: false, score: 0, reason: "frase tem erro conhecido e nenhum foi apontado" };
+
+      '
+    metric: Deteccao
+- description: French - correta
+  vars:
+    language: French
+    answer: Bonjour, comment ça va?
+  metadata:
+    language: French
+    esperado: correta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length === 0) return true;
+return { pass: false, score: 0, reason: `frase correta, mas apontou ${r.mistakes.length} erro(s): ${JSON.stringify(r.mistakes).slice(0, 200)}` };
+
+      '
+    metric: Deteccao
+- description: French - contracao au/a le
+  vars:
+    language: French
+    answer: Je suis allé à le magasin.
+  metadata:
+    language: French
+    esperado: incorreta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length >= 1) return true;
+return { pass: false, score: 0, reason: "frase tem erro conhecido e nenhum foi apontado" };
+
+      '
+    metric: Deteccao
+- description: German - correta
+  vars:
+    language: German
+    answer: Die Katze ist süß.
+  metadata:
+    language: German
+    esperado: correta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length === 0) return true;
+return { pass: false, score: 0, reason: `frase correta, mas apontou ${r.mistakes.length} erro(s): ${JSON.stringify(r.mistakes).slice(0, 200)}` };
+
+      '
+    metric: Deteccao
+- description: German - genero do artigo
+  vars:
+    language: German
+    answer: Der Katze ist süß.
+  metadata:
+    language: German
+    esperado: incorreta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length >= 1) return true;
+return { pass: false, score: 0, reason: "frase tem erro conhecido e nenhum foi apontado" };
+
+      '
+    metric: Deteccao
+- description: English - correta
+  vars:
+    language: English
+    answer: She goes to the market.
+  metadata:
+    language: English
+    esperado: correta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length === 0) return true;
+return { pass: false, score: 0, reason: `frase correta, mas apontou ${r.mistakes.length} erro(s): ${JSON.stringify(r.mistakes).slice(0, 200)}` };
+
+      '
+    metric: Deteccao
+- description: English - concordancia verbal
+  vars:
+    language: English
+    answer: She go to the market.
+  metadata:
+    language: English
+    esperado: incorreta
+  assert:
+  - type: javascript
+    value: 'const r = typeof output === "string" ? JSON.parse(output) : output;
+
+      if (!Array.isArray(r.mistakes)) return { pass: false, score: 0, reason: "campo mistakes ausente ou nao e lista" };
+
+      if (r.mistakes.length >= 1) return true;
+return { pass: false, score: 0, reason: "frase tem erro conhecido e nenhum foi apontado" };
+
+      '
+    metric: Deteccao

@@ -1,0 +1,16 @@
+{
+  "name": "prostaff-llm-cost-comparison",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Harness de comparacao de custo, latencia e qualidade entre LLMs",
+  "scripts": {
+    "eval": "promptfoo eval -c promptfooconfig.cost-comparison.yaml --repeat 3 -o results.json",
+    "eval:smoke": "promptfoo eval -c promptfooconfig.smoke.yaml",
+    "analyze": "node analyze-cost-comparison.js results.json",
+    "view": "promptfoo view",
+    "eval:anthropic": "promptfoo eval -c promptfooconfig.anthropic-only.yaml --repeat 3 -o results.json"
+  },
+  "devDependencies": {
+    "promptfoo": "0.120.19"
+  }
+}
