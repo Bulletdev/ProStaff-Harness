@@ -1,0 +1,44 @@
+{
+  "stack": "ruby",
+  "detect": ["Gemfile"],
+  "verifiers": [
+    {
+      "id": "tests",
+      "run": ["bundle", "exec", "rspec"],
+      "extract": { "kind": "exit-code" },
+      "watch": ["app/**", "lib/**", "spec/**", "Gemfile.lock"],
+      "timeout_s": 1800,
+      "stacks": ["ruby"],
+      "applies_when_exists": ["Gemfile"]
+    },
+    {
+      "id": "lint",
+      "run": ["bundle", "exec", "rubocop", "--format", "quiet"],
+      "extract": { "kind": "exit-code" },
+      "watch": ["app/**", "lib/**", "spec/**", ".rubocop.yml"],
+      "timeout_s": 600,
+      "stacks": ["ruby"],
+      "applies_when_exists": [".rubocop.yml"]
+    },
+    {
+      "id": "coverage",
+      "run": ["bundle", "exec", "rspec"],
+      "extract": { "kind": "simplecov", "file": "coverage/.last_run.json", "metric": "lines.pct" },
+      "watch": ["app/**", "lib/**", "spec/**", "Gemfile.lock"],
+      "timeout_s": 1800,
+      "stacks": ["ruby"],
+      "applies_when_exists": ["Gemfile"]
+    },
+    {
+      "id": "security-critical",
+      "run": ["bundle", "exec", "bundler-audit", "check", "--format", "json"],
+      "extract": { "kind": "json", "from": "stdout", "pointer": "/summary/critical" },
+      "watch": ["Gemfile", "Gemfile.lock"],
+      "timeout_s": 300,
+      "success_exit_codes": [0, 1],
+      "network": true,
+      "stacks": ["ruby"],
+      "applies_when_exists": ["Gemfile.lock"]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "stack": "bun",
+  "detect": ["bun.lock", "bun.lockb"],
+  "verifiers": [
+    {
+      "id": "tests",
+      "run": ["bun", "test"],
+      "extract": { "kind": "exit-code" },
+      "watch": ["src/**", "test/**", "tests/**", "package.json"],
+      "timeout_s": 900,
+      "stacks": ["bun"],
+      "applies_when_exists": ["package.json"]
+    },
+    {
+      "id": "typecheck",
+      "run": ["bunx", "tsc", "--noEmit"],
+      "extract": { "kind": "exit-code" },
+      "watch": ["src/**", "tests/**", "tsconfig.json"],
+      "timeout_s": 300,
+      "stacks": ["bun"],
+      "applies_when_exists": ["tsconfig.json"]
+    },
+    {
+      "id": "lint",
+      "run": ["bun", "run", "lint"],
+      "extract": { "kind": "exit-code" },
+      "watch": ["src/**", "tests/**", "package.json"],
+      "timeout_s": 300,
+      "stacks": ["bun"],
+      "applies_when_exists": ["package.json"]
+    },
+    {
+      "id": "coverage",
+      "run": ["bun", "test", "--coverage", "--coverage-reporter=lcov"],
+      "extract": { "kind": "lcov", "file": "coverage/lcov.info", "metric": "lines.pct" },
+      "watch": ["src/**", "test/**", "tests/**", "package.json"],
+      "timeout_s": 900,
+      "stacks": ["bun"],
+      "applies_when_exists": ["package.json"]
+    }
+  ]
+}

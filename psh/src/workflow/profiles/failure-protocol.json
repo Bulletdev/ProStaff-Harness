@@ -1,0 +1,33 @@
+{
+  "description": "Portado do harness de referencia (harness-failure-protocol-v6): 3 classes cobriveis + 1 fatal, com os mesmos defaults de retry e backoff.",
+  "classes": {
+    "transient": {
+      "description": "Falha temporaria que se auto-recupera com retry (502/503/504, ECONNRESET, ETIMEDOUT, rate limit).",
+      "max_auto_retries": 3,
+      "backoff": "exponential",
+      "delays_ms": [1000, 3000, 9000],
+      "on_exhaustion": "escalate"
+    },
+    "quality": {
+      "description": "Output nao atingiu o threshold declarado. Rework com loopback.",
+      "max_auto_retries": 2,
+      "backoff": "none",
+      "delays_ms": [],
+      "on_exhaustion": "escalate"
+    },
+    "user-action": {
+      "description": "Bloqueia e escala para humano decidir. Ambiguidade cai aqui por default.",
+      "max_auto_retries": 0,
+      "backoff": "none",
+      "delays_ms": [],
+      "on_exhaustion": "block"
+    },
+    "fatal": {
+      "description": "Para tudo. Requer intervencao manual.",
+      "max_auto_retries": 0,
+      "backoff": "none",
+      "delays_ms": [],
+      "on_exhaustion": "halt"
+    }
+  }
+}

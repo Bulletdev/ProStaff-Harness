@@ -1,0 +1,37 @@
+{
+  "stack": "common",
+  "detect": [],
+  "verifiers": [
+    {
+      "id": "spec-coverage",
+      "description": "R2.5: rastreabilidade de itens do SPEC para tasks, por parse dos artefatos. O calculo e do nucleo, nunca do modelo.",
+      "run": [
+        "${PSH}",
+        "internal",
+        "spec-coverage",
+        "--spec",
+        ".harness/SPEC.md",
+        "--tasks",
+        ".harness/sprints/**/*.md",
+        "--out",
+        ".harness/evidence/tmp/spec-coverage.json"
+      ],
+      "extract": {
+        "kind": "json",
+        "file": ".harness/evidence/tmp/spec-coverage.json",
+        "pointer": "/coverage_pct"
+      },
+      "watch": [".harness/SPEC.md", ".harness/sprints/**"],
+      "timeout_s": 120,
+      "applies_when_exists": [".harness/SPEC.md"]
+    },
+    {
+      "id": "secrets",
+      "description": "Varredura de segredo em arquivo versionado (G5, R10.5). Usa gitleaks quando presente.",
+      "run": ["gitleaks", "detect", "--no-banner", "--redact", "--report-format", "json", "--report-path", "-"],
+      "extract": { "kind": "exit-code" },
+      "watch": ["**"],
+      "timeout_s": 600
+    }
+  ]
+}

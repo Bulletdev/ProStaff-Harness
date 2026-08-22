@@ -1,0 +1,65 @@
+{
+  "stack": "node",
+  "detect": ["package.json"],
+  "verifiers": [
+    {
+      "id": "tests",
+      "description": "Suite de testes. O veredito e o codigo de saida do runner (R2.10b).",
+      "run": ["npm", "test", "--silent"],
+      "extract": { "kind": "exit-code" },
+      "watch": ["src/**", "lib/**", "test/**", "tests/**", "package.json"],
+      "timeout_s": 900,
+      "stacks": ["node"],
+      "applies_when_exists": ["package.json"]
+    },
+    {
+      "id": "typecheck",
+      "run": ["npm", "run", "--silent", "typecheck"],
+      "extract": { "kind": "exit-code" },
+      "watch": ["src/**", "lib/**", "tsconfig.json", "package.json"],
+      "timeout_s": 300,
+      "stacks": ["node"],
+      "applies_when_exists": ["tsconfig.json"]
+    },
+    {
+      "id": "lint",
+      "run": ["npm", "run", "--silent", "lint"],
+      "extract": { "kind": "exit-code" },
+      "watch": ["src/**", "lib/**", "test/**", "tests/**", "package.json"],
+      "timeout_s": 300,
+      "stacks": ["node"],
+      "applies_when_exists": ["package.json"]
+    },
+    {
+      "id": "coverage",
+      "run": ["npm", "run", "--silent", "test:coverage"],
+      "extract": { "kind": "lcov", "file": "coverage/lcov.info", "metric": "lines.pct" },
+      "watch": ["src/**", "lib/**", "test/**", "tests/**", "package.json"],
+      "timeout_s": 900,
+      "stacks": ["node"],
+      "applies_when_exists": ["package.json"]
+    },
+    {
+      "id": "security-critical",
+      "run": ["npm", "audit", "--json"],
+      "extract": { "kind": "json", "from": "stdout", "pointer": "/metadata/vulnerabilities/critical" },
+      "watch": ["package.json", "package-lock.json"],
+      "timeout_s": 300,
+      "success_exit_codes": [0, 1],
+      "network": true,
+      "stacks": ["node"],
+      "applies_when_exists": ["package-lock.json"]
+    },
+    {
+      "id": "security-high",
+      "run": ["npm", "audit", "--json"],
+      "extract": { "kind": "json", "from": "stdout", "pointer": "/metadata/vulnerabilities/high" },
+      "watch": ["package.json", "package-lock.json"],
+      "timeout_s": 300,
+      "success_exit_codes": [0, 1],
+      "network": true,
+      "stacks": ["node"],
+      "applies_when_exists": ["package-lock.json"]
+    }
+  ]
+}

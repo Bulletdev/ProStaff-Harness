@@ -1,0 +1,76 @@
+{
+  "profile": "lean",
+  "description": "briefing, planejamento e build. Mesmos portoes de qualidade da strict na fase de build, sem a esteira documental.",
+  "entry": "phase.0.briefing",
+  "phases": [
+    {
+      "id": "phase.0.briefing",
+      "name": "Briefing",
+      "owner": "briefing",
+      "terminal": false,
+      "next": ["phase.4.planejamento"],
+      "gate": {
+        "type": "all-of",
+        "checks": [
+          { "kind": "presence", "file": ".harness/brief.md", "min_lines": 5 },
+          { "kind": "user-approval", "subject": ".harness/brief.md", "message": "Aprove o brief antes de seguir" }
+        ],
+        "on_fail": { "action": "block", "message": "Aguardando brief.md completo e aprovado" }
+      },
+      "on_failure": { "class": "user-action", "max_auto_retries": 0, "backoff": "none", "delays_ms": [] }
+    },
+    {
+      "id": "phase.4.planejamento",
+      "name": "Planejamento simplificado",
+      "owner": "sprint-tasker",
+      "terminal": false,
+      "next": ["phase.5.build"],
+      "gate": {
+        "type": "all-of",
+        "checks": [
+          { "kind": "presence", "file": ".harness/SPEC.md", "min_lines": 15 },
+          { "kind": "verifier", "verifier": "spec-coverage", "min": 100 }
+        ],
+        "on_fail": {
+          "action": "rework",
+          "loopback_to": "phase.4.planejamento",
+          "message": "Planejamento incompleto ou SPEC sem cobertura de tasks"
+        }
+      },
+      "on_failure": {
+        "class": "quality",
+        "max_auto_retries": 2,
+        "backoff": "none",
+        "delays_ms": [],
+        "loopback_to": "phase.4.planejamento"
+      }
+    },
+    {
+      "id": "phase.5.build",
+      "name": "Build + Quality (lean)",
+      "owner": "orchestrator",
+      "terminal": true,
+      "next": [],
+      "gate": {
+        "type": "all-of",
+        "checks": [
+          { "kind": "verifier-status", "verifier": "tests" },
+          { "kind": "verifier", "verifier": "coverage", "min": 70 },
+          { "kind": "verifier", "verifier": "security-critical", "max": 0 }
+        ],
+        "on_fail": {
+          "action": "rework",
+          "loopback_to": "phase.5.build",
+          "message": "Qualidade abaixo do threshold"
+        }
+      },
+      "on_failure": {
+        "class": "quality",
+        "max_auto_retries": 2,
+        "backoff": "none",
+        "delays_ms": [],
+        "loopback_to": "phase.5.build"
+      }
+    }
+  ]
+}

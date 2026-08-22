@@ -1,0 +1,42 @@
+{
+  "stack": "python",
+  "detect": ["pyproject.toml", "setup.cfg"],
+  "verifiers": [
+    {
+      "id": "tests",
+      "run": ["pytest", "-q"],
+      "extract": { "kind": "exit-code" },
+      "watch": ["src/**", "tests/**", "pyproject.toml"],
+      "timeout_s": 900,
+      "stacks": ["python"],
+      "applies_when_exists": ["pyproject.toml"]
+    },
+    {
+      "id": "typecheck",
+      "run": ["mypy", "."],
+      "extract": { "kind": "exit-code" },
+      "watch": ["src/**", "pyproject.toml"],
+      "timeout_s": 300,
+      "stacks": ["python"],
+      "applies_when_exists": ["pyproject.toml"]
+    },
+    {
+      "id": "lint",
+      "run": ["ruff", "check", "."],
+      "extract": { "kind": "exit-code" },
+      "watch": ["src/**", "tests/**", "pyproject.toml"],
+      "timeout_s": 300,
+      "stacks": ["python"],
+      "applies_when_exists": ["pyproject.toml"]
+    },
+    {
+      "id": "coverage",
+      "run": ["pytest", "-q", "--cov", "--cov-report=xml:coverage.xml"],
+      "extract": { "kind": "cobertura", "file": "coverage.xml", "metric": "lines.pct" },
+      "watch": ["src/**", "tests/**", "pyproject.toml"],
+      "timeout_s": 900,
+      "stacks": ["python"],
+      "applies_when_exists": ["pyproject.toml"]
+    }
+  ]
+}

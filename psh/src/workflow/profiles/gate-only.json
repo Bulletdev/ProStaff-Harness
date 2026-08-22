@@ -1,0 +1,5 @@
+{
+  "profile": "gate-only",
+  "description": "Nenhuma fase. So os portoes de qualidade rodam sobre o fluxo de trabalho existente (UC2). Use 'psh verify --all'.",
+  "phases": []
+}

@@ -1,0 +1,184 @@
+{
+  "profile": "strict",
+  "description": "6 fases + gate de UX, herdado do harness de referencia. A fase terminal e declarada (o contrato original apontava next para 'phase.5.complete', que nunca existiu).",
+  "entry": "phase.0.briefing",
+  "phases": [
+    {
+      "id": "phase.0.briefing",
+      "name": "Briefing",
+      "owner": "briefing",
+      "terminal": false,
+      "next": ["phase.1.documentacao"],
+      "gate": {
+        "type": "all-of",
+        "checks": [
+          { "kind": "presence", "file": ".harness/brief.md", "min_lines": 5 },
+          { "kind": "user-approval", "subject": ".harness/brief.md", "message": "Aprove o brief antes de seguir" }
+        ],
+        "on_fail": { "action": "block", "message": "Aguardando brief.md completo e aprovado" }
+      },
+      "on_failure": { "class": "user-action", "max_auto_retries": 0, "backoff": "none", "delays_ms": [] }
+    },
+    {
+      "id": "phase.1.documentacao",
+      "name": "Documentacao + RAG",
+      "owner": "documenter",
+      "terminal": false,
+      "next": ["phase.2.requisitos"],
+      "gate": {
+        "type": "all-of",
+        "checks": [
+          { "kind": "presence", "file": ".harness/AGENTS.md", "min_lines": 50 },
+          { "kind": "presence", "file": ".harness/ARCH.md", "min_lines": 20 },
+          { "kind": "presence", "file": ".harness/RAG/index.json", "min_bytes": 2 }
+        ],
+        "on_fail": {
+          "action": "rework",
+          "loopback_to": "phase.1.documentacao",
+          "message": "AGENTS.md, ARCH.md ou RAG/index.json incompletos"
+        }
+      },
+      "on_failure": {
+        "class": "quality",
+        "max_auto_retries": 2,
+        "backoff": "none",
+        "delays_ms": [],
+        "loopback_to": "phase.1.documentacao"
+      }
+    },
+    {
+      "id": "phase.2.requisitos",
+      "name": "Requisitos (PRD + SPEC)",
+      "owner": "requirements",
+      "terminal": false,
+      "next": ["phase.3.design"],
+      "gate": {
+        "type": "all-of",
+        "checks": [
+          {
+            "kind": "review-score",
+            "file": ".harness/reviews/prd.review.json",
+            "target": ".harness/PRD.md",
+            "min": 80
+          },
+          {
+            "kind": "review-score",
+            "file": ".harness/reviews/spec.review.json",
+            "target": ".harness/SPEC.md",
+            "min": 85
+          }
+        ],
+        "on_fail": {
+          "action": "rework",
+          "loopback_to": "phase.2.requisitos",
+          "message": "PRD ou SPEC abaixo do score minimo"
+        }
+      },
+      "on_failure": {
+        "class": "quality",
+        "max_auto_retries": 2,
+        "backoff": "none",
+        "delays_ms": [],
+        "loopback_to": "phase.2.requisitos"
+      }
+    },
+    {
+      "id": "phase.3.design",
+      "name": "Design (PRODUCT + DESIGN + PROMPT)",
+      "owner": "design",
+      "terminal": false,
+      "next": ["phase.4.planejamento"],
+      "gate": {
+        "type": "all-of",
+        "checks": [
+          {
+            "kind": "review-score",
+            "file": ".harness/reviews/design.review.json",
+            "target": ".harness/PRODUCT.md",
+            "min": 70
+          }
+        ],
+        "on_fail": {
+          "action": "rework",
+          "loopback_to": "phase.3.design",
+          "message": "Design abaixo do score minimo"
+        }
+      },
+      "on_failure": {
+        "class": "quality",
+        "max_auto_retries": 2,
+        "backoff": "none",
+        "delays_ms": [],
+        "loopback_to": "phase.3.design"
+      }
+    },
+    {
+      "id": "phase.4.planejamento",
+      "name": "Sprint Planning",
+      "owner": "sprint-tasker",
+      "terminal": false,
+      "next": ["phase.5.build"],
+      "gate": {
+        "type": "all-of",
+        "checks": [{ "kind": "verifier", "verifier": "spec-coverage", "min": 100 }],
+        "on_fail": {
+          "action": "rework",
+          "loopback_to": "phase.4.planejamento",
+          "message": "Nem todo item do SPEC esta coberto por task"
+        }
+      },
+      "on_failure": {
+        "class": "quality",
+        "max_auto_retries": 2,
+        "backoff": "none",
+        "delays_ms": [],
+        "loopback_to": "phase.4.planejamento"
+      }
+    },
+    {
+      "id": "phase.5.build",
+      "name": "Build + Quality",
+      "owner": "orchestrator",
+      "terminal": false,
+      "next": ["phase.6.ux-gate"],
+      "gate": {
+        "type": "all-of",
+        "checks": [
+          { "kind": "verifier-status", "verifier": "tests" },
+          { "kind": "verifier-status", "verifier": "typecheck" },
+          { "kind": "verifier-status", "verifier": "lint" },
+          { "kind": "verifier", "verifier": "coverage", "min": 85 },
+          { "kind": "verifier", "verifier": "security-critical", "max": 0 },
+          { "kind": "verifier", "verifier": "security-high", "max": 0 }
+        ],
+        "on_fail": {
+          "action": "rework",
+          "loopback_to": "phase.5.build",
+          "message": "Qualidade abaixo do threshold na sprint"
+        }
+      },
+      "on_failure": {
+        "class": "quality",
+        "max_auto_retries": 2,
+        "backoff": "none",
+        "delays_ms": [],
+        "loopback_to": "phase.5.build"
+      }
+    },
+    {
+      "id": "phase.6.ux-gate",
+      "name": "UX Milestone Gate",
+      "owner": "ux",
+      "terminal": true,
+      "next": [],
+      "gate": {
+        "type": "all-of",
+        "checks": [
+          { "kind": "user-approval", "subject": "milestone-ux", "message": "Aprove a UX para fechar o marco" }
+        ],
+        "on_fail": { "action": "block", "message": "Aguardando aprovacao de UX para fechar o marco" }
+      },
+      "on_failure": { "class": "user-action", "max_auto_retries": 0, "backoff": "none", "delays_ms": [] }
+    }
+  ]
+}

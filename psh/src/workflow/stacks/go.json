@@ -1,0 +1,33 @@
+{
+  "stack": "go",
+  "detect": ["go.mod"],
+  "verifiers": [
+    {
+      "id": "tests",
+      "run": ["go", "test", "./..."],
+      "extract": { "kind": "exit-code" },
+      "watch": ["**/*.go", "go.mod", "go.sum"],
+      "timeout_s": 900,
+      "stacks": ["go"],
+      "applies_when_exists": ["go.mod"]
+    },
+    {
+      "id": "typecheck",
+      "run": ["go", "vet", "./..."],
+      "extract": { "kind": "exit-code" },
+      "watch": ["**/*.go", "go.mod"],
+      "timeout_s": 300,
+      "stacks": ["go"],
+      "applies_when_exists": ["go.mod"]
+    },
+    {
+      "id": "coverage",
+      "run": ["go", "test", "./...", "-coverprofile=coverage.out"],
+      "extract": { "kind": "go-cover", "file": "coverage.out", "metric": "lines.pct" },
+      "watch": ["**/*.go", "go.mod", "go.sum"],
+      "timeout_s": 900,
+      "stacks": ["go"],
+      "applies_when_exists": ["go.mod"]
+    }
+  ]
+}
