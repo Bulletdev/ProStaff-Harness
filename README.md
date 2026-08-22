@@ -5,7 +5,7 @@
         ██╔═══╝ ╚════██║██╔══██║
         ██║     ███████║██║  ██║
         ╚═╝     ╚══════╝╚═╝  ╚═╝
-   ProStaff Harness - portoes que exigem prova
+   ProStaff Harness - Execução Verificável e Auditoria de Evidências
 ```
 
 <div align="center">
@@ -175,15 +175,15 @@ psh advance  ->  le APENAS registros de evidencia
 
 O que isso impede, na pratica:
 
-| Tentativa | Resultado |
-|---|---|
-| Passar a metrica por argumento | recusa nomeada, saida 5 |
-| Avancar sem ter verificado | reprova por "nao verificado" |
-| Verificar e continuar editando | reprova por evidencia obsoleta, com o arquivo citado |
-| Verificador que falhou ao rodar | reprova, e a metrica do relatorio nao e aproveitada |
-| Suite morta por timeout ou sinal | falha, nunca zero |
-| Apagar uma linha da trilha | `psh audit verify` acusa, saida 4 |
-| Reescrever a trilha inteira relinkada | a ancora fora do arquivo acusa |
+|           Tentativa             |                     Resultado                        |
+|---------------------------------|------------------------------------------------------|
+| Passar a metrica por argumento  | recusa nomeada, saida 5                              |
+| Avancar sem ter verificado      | reprova por "nao verificado"                         |
+| Verificar e continuar editando  | reprova por evidencia obsoleta, com o arquivo citado |
+| Verificador que falhou ao rodar | reprova, e a metrica do relatorio nao e aproveitada  |
+| Suite morta por timeout ou sinal| falha, nunca zero                                    |
+| Apagar uma linha da trilha      | `psh audit verify` acusa, saida 4                    |
+| Reescrever a trilha inteira relinkada | a ancora fora do arquivo acusa                 |
 
 ---
 
@@ -327,14 +327,14 @@ resto, com **todo** arquivo de `src/` entrando na medicao.
 
 ## 09 · Roadmap
 
-| Versao | Escopo | Estado |
+| Versao |                                      Escopo                                   |   Estado     |
 |--------|-------------------------------------------------------------------------------|--------------|
 |  0.1   | Nucleo verificavel: workflow, evidencia, auditoria, CLI, adapter CI           | **entregue** |
 |  0.2   | Motor de fronteira, integracao com ai-jail, modo degradado, suite adversarial | em andamento |
-|  0.3   | Adapter Claude Code e memoria entre sessoes | planejado |
-|  0.4   | Roteamento de modelo, contabilidade de token e custo | planejado |
-|  0.5   | Adapter OpenCode, perfis por stack | planejado |
-|  1.0   | Endurecimento, binarios assinados, matriz de CI completa | planejado |
+|  0.3   | Adapter Claude Code e memoria entre sessoes                                   |  planejado   |
+|  0.4   | Roteamento de modelo, contabilidade de token e custo                          |  planejado   |
+|  0.5   | Adapter OpenCode, perfis por stack                                            |  planejado   |
+|  1.0   | Endurecimento, binarios assinados, matriz de CI completa                      |  planejado   |
 ---
 
 ## Licenca
@@ -342,8 +342,8 @@ resto, com **todo** arquivo de `src/` entrando na medicao.
 [AGPL-3.0](LICENSE), a mesma do `prostaff-api`.
 
 O `ai-jail` e GPL-3.0 e entra como **dependencia externa invocada como
-processo**, nunca linkada: o `psh` monta um argv e executa o binario. Nao ha
-obra derivada, e as duas licencas convivem.
+processo**, nunca linkada: o `psh` monta um argv e executa o binario. 
+Nao ha obra derivada, e as duas licencas casam.
 
 ---
 

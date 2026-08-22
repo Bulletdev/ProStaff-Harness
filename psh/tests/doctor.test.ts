@@ -15,8 +15,8 @@ function acha(checks: Check[], id: string): Check {
   return found;
 }
 
-function projeto(over: Partial<WorkflowContract> = {}) {
-  const layout = tempProject();
+function projeto(over: Partial<WorkflowContract> = {}, opts: { git?: boolean } = {}) {
+  const layout = tempProject({ git: opts.git });
   writeFile(layout, "src/a.ts", "export const a = 1;\n");
   const contrato: Partial<WorkflowContract> & { phases: WorkflowContract["phases"] } = {
     profile: "lean",
@@ -144,16 +144,41 @@ describe("psh doctor (R10.2, R10.2b)", () => {
     }
   });
 
+  test("projeto fora do Git enumera por caminhada, e isso e resultado normal", () => {
+    const layout = projeto({}, { git: false });
+    const ctx = openProject(layout.root);
+    try {
+      const enumeracao = acha(runDoctor(ctx).checks, "workspace-enum");
+      expect(enumeracao.level).toBe("ok");
+      expect(enumeracao.message).toContain("caminhada");
+    } finally {
+      ctx.close();
+    }
+  });
+
   test("R2.4: '.git/' presente sem repositorio utilizavel e falha declarada, nao fallback silencioso", () => {
-    const layout = projeto();
-    // Diretorio `.git` vazio: nao e repositorio valido para o git, e tambem
-    // cobre o ambiente onde o binario do git nem existe.
+    // `.git` vazio nao e repositorio valido. O cenario precisa valer nos dois
+    // ambientes: onde o git existe (ele recusa o diretorio) e onde nem existe
+    // (o spawn falha). Amarrar o teste a um dos dois faz ele passar por acaso.
+    const layout = projeto({}, { git: false });
     mkdirSync(join(layout.root, ".git"), { recursive: true });
     const ctx = openProject(layout.root);
     try {
       const enumeracao = acha(runDoctor(ctx).checks, "workspace-enum");
       expect(enumeracao.level).toBe("fail");
       expect(enumeracao.detail).toContain(".gitignore");
+    } finally {
+      ctx.close();
+    }
+  });
+
+  test.skipIf(!GIT_AVAILABLE)("repositorio Git valido enumera por git, respeitando .gitignore", () => {
+    const layout = projeto();
+    const ctx = openProject(layout.root);
+    try {
+      const enumeracao = acha(runDoctor(ctx).checks, "workspace-enum");
+      expect(enumeracao.level).toBe("ok");
+      expect(enumeracao.message).toContain("git");
     } finally {
       ctx.close();
     }
