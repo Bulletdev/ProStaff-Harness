@@ -15,8 +15,10 @@ import { buildStatus, renderStatus } from "./cli/status.ts";
 import { renderDoctor, runDoctor } from "./cli/doctor.ts";
 import { runSpecCoverage } from "./cli/spec-coverage.ts";
 import { renderCi, runCi } from "./adapters/ci.ts";
+import { addWriteGlob, boundaryOf, checkPath, renderBoundaryList, renderExec, runExec } from "./cli/boundary.ts";
 import { advance } from "./workflow/advance.ts";
 import { approvalPath, assertNoForgedMetrics, type ApprovalRecord } from "./gate/evaluate.ts";
+import { DENY_ALWAYS } from "./boundary/policy.ts";
 import type { ProfileName } from "./workflow/types.ts";
 
 const USAGE = `psh ${PSH_VERSION} - ProStaff Harness (nucleo verificavel)
@@ -28,6 +30,8 @@ const USAGE = `psh ${PSH_VERSION} - ProStaff Harness (nucleo verificavel)
   psh approve   <assunto> [--as <nome>]
   psh audit     verify|log [-n <N>] [--json]
   psh doctor    [--json]
+  psh boundary  list|check <caminho>|add <agente> <glob> [--agent <id>] [--json]
+  psh exec      --agent <id> [--timeout <s>] -- <comando...>
   psh adapter   ci [--json] [--gate-only] [--skip-verify]
   psh internal  spec-coverage --spec <arquivo> --tasks <glob> [--out <arquivo>]
 
@@ -67,6 +71,10 @@ export async function main(argv: string[]): Promise<ExitCode> {
       return cmdAudit(args);
     case "doctor":
       return cmdDoctor(args);
+    case "boundary":
+      return cmdBoundary(args);
+    case "exec":
+      return cmdExec(args);
     case "adapter":
       return cmdAdapter(args);
     case "internal":
@@ -273,6 +281,86 @@ function cmdDoctor(args: ParsedArgs): ExitCode {
       flagBool(args, "json") ? `${JSON.stringify(report, null, 2)}\n` : `${renderDoctor(report)}\n`,
     );
     return report.failed > 0 ? EXIT.FAILURE : EXIT.OK;
+  } finally {
+    ctx.close();
+  }
+}
+
+function cmdBoundary(args: ParsedArgs): ExitCode {
+  rejectUnknownFlags(args, ["json", "root", "agent", "yes"], "boundary");
+  const sub = args.positional[0] ?? "list";
+  const ctx = openProject(flagString(args, "root") ?? undefined);
+  try {
+    const policy = boundaryOf(ctx);
+
+    if (sub === "list") {
+      io().out(
+        flagBool(args, "json")
+          ? `${JSON.stringify({ deny_always: DENY_ALWAYS, agents: policy.contract.agents, default_agent: policy.defaultAgent }, null, 2)}\n`
+          : `${renderBoundaryList(policy)}\n`,
+      );
+      return EXIT.OK;
+    }
+
+    if (sub === "check") {
+      const alvo = args.positional[1];
+      if (alvo === undefined) throw new PshError("uso: psh boundary check <caminho> [--agent <id>]", { exitCode: EXIT.FAILURE });
+      const agente = flagString(args, "agent") ?? policy.defaultAgent;
+      if (agente === undefined) {
+        throw new PshError("nenhum agente informado e o boundary.json nao declara default_agent", { exitCode: EXIT.CONTRACT_INVALID });
+      }
+      const r = checkPath(policy, agente, alvo);
+      io().out(
+        flagBool(args, "json")
+          ? `${JSON.stringify(r, null, 2)}\n`
+          : `${r.allowed ? "PERMITIDO" : "BLOQUEADO"}  ${r.path}\n  agente ${r.agent}, regra ${r.rule}\n  ${r.reason}\n`,
+      );
+      return r.allowed ? EXIT.OK : EXIT.BOUNDARY_VIOLATION;
+    }
+
+    if (sub === "add") {
+      const agente = args.positional[1];
+      const glob = args.positional[2];
+      if (agente === undefined || glob === undefined) {
+        throw new PshError("uso: psh boundary add <agente> <glob>", { exitCode: EXIT.FAILURE });
+      }
+      const novo = addWriteGlob(ctx, agente, glob, (q) => confirmTty(`${q} [s/N] `, flagBool(args, "yes")), `human:${process.env.USER ?? "operador"}`);
+      io().out(`allowlist de '${agente}' agora: ${novo.agents[agente]!.write.join(", ")}\n`);
+      return EXIT.OK;
+    }
+
+    throw new PshError(`subcomando desconhecido: psh boundary ${sub}. Use list, check ou add.`, { exitCode: EXIT.FAILURE });
+  } finally {
+    ctx.close();
+  }
+}
+
+function cmdExec(args: ParsedArgs): ExitCode {
+  rejectUnknownFlags(args, ["agent", "timeout", "json", "root"], "exec");
+  const ctx = openProject(flagString(args, "root") ?? undefined);
+  try {
+    const policy = boundaryOf(ctx);
+    const agente = flagString(args, "agent") ?? policy.defaultAgent;
+    if (agente === undefined) {
+      throw new PshError("informe --agent ou declare default_agent no boundary.json", { exitCode: EXIT.CONTRACT_INVALID });
+    }
+    if (args.positional.length === 0) {
+      throw new PshError("uso: psh exec --agent <id> -- <comando...>", { exitCode: EXIT.FAILURE });
+    }
+    const timeout = flagString(args, "timeout");
+    const outcome = runExec(ctx, agente, args.positional, {
+      timeout_s: timeout === null ? undefined : Number(timeout),
+    });
+
+    io().out(
+      flagBool(args, "json") ? `${JSON.stringify(outcome, null, 2)}\n` : `${renderExec(outcome)}\n`,
+    );
+
+    // Violacao ganha do codigo do comando: um comando que "passou" tentando
+    // escapar da fronteira nao pode reportar sucesso.
+    if (outcome.result.violations.length > 0) return EXIT.BOUNDARY_VIOLATION;
+    if (outcome.result.spawn_error !== null || outcome.result.signal !== null) return EXIT.FAILURE;
+    return (outcome.result.exit_code ?? EXIT.FAILURE) as ExitCode;
   } finally {
     ctx.close();
   }

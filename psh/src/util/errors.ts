@@ -9,6 +9,8 @@ export const EXIT = {
   AUDIT_BROKEN: 4,
   FORGED_INPUT: 5,
   NOT_INITIALIZED: 6,
+  /** Fronteira violada. Ganha do codigo do comando: a corrida esta contaminada. */
+  BOUNDARY_VIOLATION: 7,
 } as const;
 
 export type ExitCode = (typeof EXIT)[keyof typeof EXIT];
