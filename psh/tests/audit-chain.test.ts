@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AuditChain, entryHash, GENESIS_HASH, type AuditAnchor } from "../src/audit/chain.ts";
 import { HarnessDb } from "../src/db/index.ts";
@@ -138,16 +138,27 @@ describe("trilha encadeada por hash (R4.1, R4.2)", () => {
 
   test("R4.2: falha de escrita na trilha e erro fatal, nunca aviso", () => {
     const layout = tempProject({ git: false });
-    const dir = join(layout.root, "somente-leitura");
-    mkdirSync(dir, { recursive: true });
-    const chain = new AuditChain(join(dir, "chain.jsonl"));
-    chain.append("audit.note", "core:psh", { primeiro: true });
-    chmodSync(dir, 0o500);
-    try {
-      expect(() => chain.append("audit.note", "core:psh", { segundo: true })).toThrow(AuditError);
-    } finally {
-      chmodSync(dir, 0o700);
-    }
+    // O impedimento e estrutural, nao de permissao: o "diretorio" da trilha e
+    // um arquivo comum, entao abrir a trilha dentro dele da ENOTDIR.
+    //
+    // Usar `chmod 0500` daria certo como usuario comum e falharia como root,
+    // que ignora bits de permissao. Runner de CI costuma rodar como root, e um
+    // teste que so reprova para alguns usuarios nao esta testando a regra.
+    const naoEhDiretorio = join(layout.root, "isto-e-um-arquivo");
+    writeFileSync(naoEhDiretorio, "conteudo\n");
+
+    const chain = new AuditChain(join(naoEhDiretorio, "chain.jsonl"));
+    expect(() => chain.append("audit.note", "core:psh", { x: 1 })).toThrow(AuditError);
+    expect(() => chain.append("audit.note", "core:psh", { x: 1 })).toThrow(/trilha/);
+  });
+
+  test("R4.2: trilha que fica ilegivel no meio do caminho tambem e fatal", () => {
+    const { layout, db, chain } = chainWithAnchor();
+    seed(chain, 2);
+    // Conteudo corrompido no fim: encadear em cima seria inventar continuidade.
+    writeFileSync(layout.chainPath, `${readFileSync(layout.chainPath, "utf8")}{quebrado\n`);
+    expect(() => chain.append("audit.note", "core:psh", {})).toThrow(AuditError);
+    db.close();
   });
 
   test("cadeia vazia com ancora ausente e valida; ancora sem cadeia e denunciada", () => {

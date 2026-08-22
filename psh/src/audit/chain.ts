@@ -242,7 +242,17 @@ export class AuditChain {
 
   #lock(): () => void {
     const lockPath = `${this.path}.lock`;
-    mkdirSync(dirname(this.path), { recursive: true });
+    // Preparar o lock tambem e parte de gravar na trilha: se falhar aqui, o
+    // erro precisa sair como fatal de auditoria, e nao como excecao crua que
+    // vira "falha generica" no codigo de saida.
+    try {
+      mkdirSync(dirname(this.path), { recursive: true });
+    } catch (cause) {
+      throw new AuditError(
+        `nao foi possivel preparar o diretorio da trilha em ${dirname(this.path)}: ${(cause as Error).message}`,
+        { path: this.path },
+      );
+    }
     const deadline = Date.now() + 5000;
     for (;;) {
       try {
