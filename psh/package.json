@@ -1,0 +1,32 @@
+{
+  "name": "psh",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ProStaff Harness - nucleo verificavel (workflow, evidence, audit)",
+  "type": "module",
+  "module": "src/index.ts",
+  "bin": {
+    "psh": "src/index.ts"
+  },
+  "scripts": {
+    "build": "bun build --compile --minify --sourcemap src/index.ts --outfile dist/psh",
+    "test": "bun test",
+    "test:cov": "bun test --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint:regex": "bun run scripts/check-no-path-regex.ts",
+    "check": "bun run typecheck && bun run lint:regex && bun test --coverage"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  },
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Bulletdev/ProStaff-Harness.git",
+    "directory": "psh"
+  }
+}

@@ -1,0 +1,277 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://prostaff.dev/schemas/psh-workflow-v1.json",
+  "title": "psh workflow contract",
+  "type": "object",
+  "required": ["_type", "version", "profile", "phases", "failure_protocol"],
+  "additionalProperties": false,
+  "properties": {
+    "_type": { "const": "psh-workflow" },
+    "version": { "const": 1 },
+    "profile": { "enum": ["strict", "lean", "gate-only"] },
+    "description": { "type": "string" },
+    "entry": { "$ref": "#/definitions/phaseId" },
+    "verifiers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/verifier" }
+    },
+    "phases": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/phase" }
+    },
+    "failure_protocol": { "$ref": "#/definitions/failureProtocol" }
+  },
+  "definitions": {
+    "phaseId": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "verifierId": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9-]*$" },
+
+    "verifier": {
+      "type": "object",
+      "required": ["id", "run", "extract", "watch", "timeout_s"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/verifierId" },
+        "description": { "type": "string" },
+        "run": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "cwd": { "type": "string", "default": "." },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "extract": { "$ref": "#/definitions/extract" },
+        "watch": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Globs observados para o calculo de frescor (R2.4)."
+        },
+        "watch_exclude": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "timeout_s": { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "success_exit_codes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "default": [0],
+          "description": "R2.10b: o exit code continua sendo a autoridade; ferramentas com codigo nao-zero significativo (npm audit) declaram isso aqui, no contrato, nunca por inferencia de texto."
+        },
+        "network": {
+          "type": "boolean",
+          "default": false,
+          "description": "R2.7: rede desligada por padrao; verificador que precisa de rede declara aqui."
+        },
+        "stacks": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "R2.12: stacks suportadas. Ausente = aplica a qualquer stack."
+        },
+        "applies_when_exists": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "R2.12: arquivos que precisam existir para o verificador se aplicar. Nenhum presente => skipped explicito."
+        }
+      }
+    },
+
+    "extract": {
+      "type": "object",
+      "required": ["kind"],
+      "oneOf": [
+        {
+          "properties": {
+            "kind": { "const": "exit-code" }
+          },
+          "required": ["kind"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "kind": { "enum": ["lcov", "cobertura", "simplecov", "go-cover"] },
+            "file": { "type": "string", "minLength": 1 },
+            "metric": { "enum": ["lines.pct", "functions.pct", "branches.pct", "statements.pct"] }
+          },
+          "required": ["kind", "file", "metric"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "kind": { "const": "json" },
+            "from": { "enum": ["file", "stdout"], "default": "file" },
+            "file": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Obrigatorio quando from = file."
+            },
+            "pointer": {
+              "type": "string",
+              "pattern": "^(/[^/]*)*$",
+              "description": "JSON Pointer RFC 6901. Nunca expressao regular (R2.14)."
+            }
+          },
+          "required": ["kind", "pointer"],
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "phase": {
+      "type": "object",
+      "required": ["id", "name", "terminal", "next", "gate", "on_failure"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/phaseId" },
+        "name": { "type": "string", "minLength": 1 },
+        "owner": { "type": "string" },
+        "description": { "type": "string" },
+        "terminal": {
+          "type": "boolean",
+          "description": "R1.5b: fase terminal e declarada, nunca inferida de um next que nao resolve."
+        },
+        "next": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/phaseId" }
+        },
+        "gate": { "$ref": "#/definitions/gate" },
+        "on_failure": { "$ref": "#/definitions/onFailure" }
+      }
+    },
+
+    "gate": {
+      "type": "object",
+      "required": ["type", "checks", "on_fail"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["all-of", "any-of", "none"] },
+        "checks": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/check" }
+        },
+        "on_fail": {
+          "type": "object",
+          "required": ["action", "message"],
+          "additionalProperties": false,
+          "properties": {
+            "action": { "enum": ["block", "rework", "restart"] },
+            "loopback_to": { "$ref": "#/definitions/phaseId" },
+            "message": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+
+    "check": {
+      "type": "object",
+      "required": ["kind"],
+      "oneOf": [
+        {
+          "description": "Compara o valor de um registro de evidencia. R2.1: o valor nunca vem do chamador.",
+          "properties": {
+            "kind": { "const": "verifier" },
+            "verifier": { "$ref": "#/definitions/verifierId" },
+            "min": { "type": "number" },
+            "max": { "type": "number" }
+          },
+          "required": ["kind", "verifier"],
+          "additionalProperties": false
+        },
+        {
+          "description": "Passa somente se o verificador rodou e saiu com codigo zero (R2.10b).",
+          "properties": {
+            "kind": { "const": "verifier-status" },
+            "verifier": { "$ref": "#/definitions/verifierId" }
+          },
+          "required": ["kind", "verifier"],
+          "additionalProperties": false
+        },
+        {
+          "description": "R2.6: score lido de arquivo de review que declara o hash do artefato revisado.",
+          "properties": {
+            "kind": { "const": "review-score" },
+            "file": { "type": "string", "minLength": 1 },
+            "target": { "type": "string", "minLength": 1 },
+            "min": { "type": "number" }
+          },
+          "required": ["kind", "file", "target", "min"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "kind": { "const": "presence" },
+            "file": { "type": "string", "minLength": 1 },
+            "min_lines": { "type": "integer", "minimum": 0 },
+            "min_bytes": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["kind", "file"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "kind": { "const": "user-approval" },
+            "subject": { "type": "string", "minLength": 1 },
+            "message": { "type": "string" }
+          },
+          "required": ["kind", "subject"],
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "onFailure": {
+      "type": "object",
+      "required": ["class", "max_auto_retries"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "enum": ["transient", "quality", "user-action", "fatal"] },
+        "max_auto_retries": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "backoff": { "enum": ["exponential", "none"] },
+        "delays_ms": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "loopback_to": { "$ref": "#/definitions/phaseId" }
+      }
+    },
+
+    "failureProtocol": {
+      "type": "object",
+      "required": ["classes"],
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "classes": {
+          "type": "object",
+          "required": ["transient", "quality", "user-action", "fatal"],
+          "additionalProperties": false,
+          "properties": {
+            "transient": { "$ref": "#/definitions/failureClass" },
+            "quality": { "$ref": "#/definitions/failureClass" },
+            "user-action": { "$ref": "#/definitions/failureClass" },
+            "fatal": { "$ref": "#/definitions/failureClass" }
+          }
+        }
+      }
+    },
+
+    "failureClass": {
+      "type": "object",
+      "required": ["max_auto_retries", "backoff", "delays_ms", "on_exhaustion"],
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "max_auto_retries": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "backoff": { "enum": ["exponential", "none"] },
+        "delays_ms": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "on_exhaustion": { "enum": ["escalate", "block", "halt"] }
+      }
+    }
+  }
+}

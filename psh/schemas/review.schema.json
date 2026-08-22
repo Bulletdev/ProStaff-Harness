@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://prostaff.dev/schemas/psh-review-v1.json",
+  "title": "psh review record (R2.6 - score de LLM amarrado ao hash do artefato revisado)",
+  "type": "object",
+  "required": ["_type", "version", "target", "target_sha256", "score", "reviewer", "reviewed_at"],
+  "additionalProperties": false,
+  "properties": {
+    "_type": { "const": "psh-review" },
+    "version": { "const": 1 },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Caminho relativo do artefato revisado."
+    },
+    "target_sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Hash do artefato no momento da review. Precisa bater com o arquivo atual."
+    },
+    "score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "reviewer": { "type": "string", "minLength": 1 },
+    "reviewed_at": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["summary", "evidence_kind"],
+        "additionalProperties": false,
+        "properties": {
+          "summary": { "type": "string" },
+          "evidence_kind": {
+            "enum": ["reproduced", "read-only"],
+            "description": "O11/R9.7b: achado reproduzido e achado so lido nao se misturam."
+          },
+          "location": { "type": "string" }
+        }
+      }
+    }
+  }
+}

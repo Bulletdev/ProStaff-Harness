@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://prostaff.dev/schemas/psh-evidence-v1.json",
+  "title": "psh evidence record (escrito somente pelo nucleo - R2.3, R2.6b)",
+  "type": "object",
+  "required": [
+    "_type", "version", "id", "verifier", "status", "value", "exit_code", "signal",
+    "started_at", "finished_at", "duration_ms", "workspace_hash", "watch",
+    "candidates_examined", "enumeration", "stdout_sha256", "stderr_sha256", "sandbox", "runner"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "_type": { "const": "psh-evidence" },
+    "version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "verifier": { "type": "string", "minLength": 1 },
+    "phase": { "type": ["string", "null"] },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "status": {
+      "enum": ["ok", "error", "skipped"],
+      "description": "R2.11: falha de execucao nunca produz valor. R2.12: nao aplicavel vira skipped explicito."
+    },
+    "value": {
+      "type": ["number", "null"],
+      "description": "R2.11: metrica ausente e null, nunca zero."
+    },
+    "exit_code": { "type": ["integer", "null"] },
+    "signal": { "type": ["string", "null"] },
+    "started_at": { "type": "string" },
+    "finished_at": { "type": "string" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "workspace_hash": { "type": ["string", "null"] },
+    "watch": { "type": "array", "items": { "type": "string" } },
+    "candidates_examined": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "R2.13: quantos candidatos o mecanismo examinou, nao quantos casou."
+    },
+    "enumeration": {
+      "enum": ["git", "walk", "walk-fallback", "none"],
+      "description": "Como a arvore observada foi enumerada. 'walk-fallback' significa repositorio Git com git indisponivel: o .gitignore nao foi respeitado."
+    },
+    "artifact": { "type": ["string", "null"] },
+    "manifest": {
+      "type": ["string", "null"],
+      "description": "Caminho do manifesto arquivo->hash usado para dizer exatamente o que mudou depois da verificacao (R2.4)."
+    },
+    "stdout_sha256": { "type": ["string", "null"] },
+    "stderr_sha256": { "type": ["string", "null"] },
+    "sandbox": {
+      "type": "object",
+      "required": ["mode", "network"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["ai-jail", "inherited", "degraded"] },
+        "network": { "type": "boolean" },
+        "detail": { "type": "string" }
+      }
+    },
+    "runner": { "type": "string", "minLength": 1 },
+    "error": {
+      "type": ["object", "null"],
+      "required": ["reason", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "enum": [
+            "spawn-failed", "timeout", "signal", "command-failed", "report-missing",
+            "parse-failed", "extractor-no-match", "no-candidates", "contradicts-exit-code",
+            "workspace-mutated-during-run", "not-applicable", "config-error"
+          ]
+        },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

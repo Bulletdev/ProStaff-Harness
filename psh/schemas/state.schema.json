@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://prostaff.dev/schemas/psh-state-v1.json",
+  "title": "psh state snapshot (escrito somente pelo nucleo - R1.3)",
+  "type": "object",
+  "required": ["_type", "version", "profile", "phase", "attempt", "retries_used", "status", "updated_at", "history"],
+  "additionalProperties": false,
+  "properties": {
+    "_type": { "const": "psh-state" },
+    "version": { "const": 1 },
+    "profile": { "enum": ["strict", "lean", "gate-only"] },
+    "phase": { "type": ["string", "null"] },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "retries_used": { "type": "integer", "minimum": 0 },
+    "status": {
+      "enum": ["in-progress", "blocked", "escalated", "passed", "passed-with-override", "complete"]
+    },
+    "sprint": { "type": ["string", "null"] },
+    "sandbox_mode": { "enum": ["ai-jail", "inherited", "degraded"] },
+    "updated_at": { "type": "string" },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["phase", "attempt", "verdict", "at"],
+        "additionalProperties": false,
+        "properties": {
+          "phase": { "type": "string" },
+          "attempt": { "type": "integer", "minimum": 1 },
+          "verdict": {
+            "enum": ["passed", "passed-with-override", "failed", "escalated", "blocked"]
+          },
+          "event_id": { "type": "string" },
+          "at": { "type": "string" }
+        }
+      }
+    }
+  }
+}
