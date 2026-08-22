@@ -11,6 +11,6 @@
     "eval:anthropic": "promptfoo eval -c promptfooconfig.anthropic-only.yaml --repeat 3 -o results.json"
   },
   "devDependencies": {
-    "promptfoo": "0.120.19"
+    "promptfoo": "0.122.0"
   }
 }
