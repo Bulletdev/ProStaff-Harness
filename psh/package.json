@@ -1,6 +1,6 @@
 {
   "name": "psh",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "ProStaff Harness - nucleo verificavel (workflow, evidence, audit)",
   "type": "module",

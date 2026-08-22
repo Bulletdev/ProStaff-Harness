@@ -15,7 +15,7 @@
 [![TypeScript](https://img.shields.io/badge/typescript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white)](https://sqlite.org/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0-orange.svg)](CHANGELOG.md)
 
 </div>
 
@@ -31,7 +31,7 @@
 ║  Cobertura, teste, lint e segurança viram registro assinado por hash da      ║
 ║  árvore que foi verificada.                                                  ║
 ║                                                                              ║
-║  v0.1.0 · núcleo verificável · 236 testes · binário único                    ║
+║  v0.2.0 · fronteira aplicada pelo kernel · 325 testes · binário único        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -374,7 +374,7 @@ Regras da suíte de testes:
 | Versão | Escopo                                                                        | Estado       |
 |--------|-------------------------------------------------------------------------------|--------------|
 | 0.1    | Núcleo verificável: workflow, evidência, auditoria, CLI, adapter CI           | **entregue** |
-| 0.2    | Motor de fronteira, integração com ai-jail, modo degradado, suíte adversarial | em andamento |
+| 0.2    | Motor de fronteira, integração com ai-jail, modo degradado, suíte adversarial | **entregue** |
 | 0.3    | Adapter Claude Code e memória entre sessões                                   | planejado    |
 | 0.4    | Roteamento de modelo, contabilidade de token e custo                          | planejado    |
 | 0.5    | Adapter OpenCode, perfis por stack                                            | planejado    |

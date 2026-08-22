@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { runCli } from "../src/index.ts";
 import { captureIo } from "../src/cli/io.ts";
 import { EXIT } from "../src/util/errors.ts";
+import { PSH_VERSION } from "../src/version.ts";
 import { flagString, parseArgs, rejectUnknownFlags } from "../src/cli/args.ts";
 import { PshError } from "../src/util/errors.ts";
 import type { WorkflowContract } from "../src/workflow/types.ts";
@@ -83,8 +84,8 @@ describe("ajuda, versao e comando desconhecido", () => {
   });
 
   test("--version imprime so a versao", async () => {
-    expect((await cli(["--version"])).out.trim()).toBe("0.1.0");
-    expect((await cli(["version"])).out.trim()).toBe("0.1.0");
+    expect((await cli(["--version"])).out.trim()).toBe(PSH_VERSION);
+    expect((await cli(["version"])).out.trim()).toBe(PSH_VERSION);
   });
 
   test("comando desconhecido sai com falha e mostra o uso", async () => {
@@ -268,7 +269,7 @@ describe("doctor e internal pela CLI", () => {
     const layout = projeto();
     const r = await cli(["doctor", "--json", "--root", layout.root]);
     const report = JSON.parse(r.out) as { psh_version: string; checks: { id: string }[] };
-    expect(report.psh_version).toBe("0.1.0");
+    expect(report.psh_version).toBe(PSH_VERSION);
     expect(report.checks.map((c) => c.id)).toContain("boundary");
     expect(report.checks.map((c) => c.id)).toContain("workspace-enum");
   });

@@ -4,7 +4,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
-## [Nao lancado]
+## [0.2.0] - 2026-08-22
 
 Motor de fronteira (C3).
 
@@ -202,4 +202,5 @@ argumento e não reaproveita um teste antigo depois de continuar editando.
 - Verificação estática de path em expressão regular integrada ao CI.
 - Matriz de CI em Linux e macOS.
 
+[0.2.0]: https://github.com/Bulletdev/ProStaff-Harness/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Bulletdev/ProStaff-Harness/releases/tag/v0.1.0
