@@ -136,7 +136,7 @@ bun run build          # gera dist/psh, binário único
 ```
 
 Isolamento de execução é opcional e usa o
-[ai-jail](https://github.com/akitaonrails/ai-jail) 0.10.0 ou superior.
+[ai-jail](https://github.com/akitaonrails/ai-jail) 1.19 ou superior.
 
 Sem ele o `psh` roda em modo degradado.
 

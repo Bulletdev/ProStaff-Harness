@@ -8,7 +8,7 @@ Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
 Motor de fronteira (C3).
 
-Ainda nao publicado: falta rodar contra um `ai-jail` real.
+Verificado contra o `ai-jail` 1.19.2 real, com o kernel aplicando a fronteira.
 
 ### Adicionado
 
@@ -36,6 +36,24 @@ Ainda nao publicado: falta rodar contra um `ai-jail` real.
   Ganha do codigo do comando: uma corrida que tentou escapar nao reporta
   sucesso.
 
+### Verificado contra o binário real
+
+A montagem inicial estava errada e só apareceu contra o `ai-jail` de verdade.
+
+Montar a raiz somente leitura e reabrir o escopo por cima não funciona: o
+ai-jail recusa `--rw-map` que se sobrepõe a um `--map` read-only, e o agente
+ficava sem escrever nem no próprio escopo.
+
+Negar a raiz inteira ou `**` quebra o setup do bwrap.
+
+A montagem passou a ser por complemento: nega o que existe e não está na
+allowlist, descendo só por onde a allowlist aponta.
+
+O que o mount não expressa é entrada nova criada em diretório gravável fora do
+escopo, e por isso o snapshot continua ligado também no modo enjaulado.
+
+São as duas camadas do R3.1, na ordem de confiança que ele descreve.
+
 ### Corrigido
 
 - **Symlink contornava o deny duro.**
@@ -48,6 +66,19 @@ Ainda nao publicado: falta rodar contra um `ai-jail` real.
   nenhum.
   
   Agora o symlink e resolvido antes de qualquer decisao.
+
+- **O `.ai-jail` que o sandbox grava virava violação do agente.**
+
+  Acusar o mecanismo de isolamento de violar a fronteira que ele aplica polui o
+  relatório e treina quem lê a ignorar violação de verdade.
+
+- **A suíte dependia de haver um `ai-jail` instalado.**
+
+  Com o binário presente, 25 testes reprovavam por motivo de ambiente: o
+  ai-jail monta `/tmp` como tmpfs e os projetos temporários vivem lá.
+
+  Agora a suíte roda em modo degradado por padrão e dá o mesmo resultado com e
+  sem o binário.
 
 ## [0.1.0] - 2026-08-22
 

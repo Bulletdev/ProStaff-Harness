@@ -289,13 +289,44 @@ Casos da suíte adversarial do R11.2 já cobertos:
 
 Os casos 1, 2, 5, 6 e 9 dependem do motor de fronteira e entram na v0.2.
 
+## Rodando a suíte completa
+
+Sete testes de integração exercitam a fronteira contra o `ai-jail` de verdade, e
+três dependem de Git.
+
+Quando as ferramentas não estão presentes eles são declarados `skip`, porque
+passar sem exercitar seria pior do que não existir.
+
+Para rodar tudo:
+
+```sh
+gh release download -R akitaonrails/ai-jail -p 'ai-jail-linux-x86_64.tar.gz*'
+sha256sum -c ai-jail-linux-x86_64.tar.gz.sha256
+tar xzf ai-jail-linux-x86_64.tar.gz
+
+PSH_AI_JAIL_BIN=$PWD/ai-jail bun test
+```
+
+A suíte roda em modo degradado por padrão, independente de haver um `ai-jail`
+instalado na máquina.
+
+Sem isso o resultado mudaria conforme o ambiente, e um teste que depende de qual
+binário está instalado não é um teste confiável.
+
 ## Nota de ambiente
 
-Um `bun` instalado por snap roda confinado e não enxerga o `git` do sistema.
+Um `bun` instalado por snap roda confinado, e o confinamento aparece de três
+formas.
 
-Nesse caso o frescor cai para caminhada e o `.gitignore` deixa de ser
-respeitado.
+Não enxerga o `git` do sistema: o frescor cai para caminhada e o `.gitignore`
+deixa de ser respeitado.
 
-O `psh doctor` reprova com `workspace-enum` quando isso acontece.
+Tem `/tmp` privado: um projeto ali fica invisível para processos fora do snap.
 
-O binário compilado por `bun run build` não tem essa limitação.
+E o `ai-jail` lançado por ele não alcança o `bwrap`, então o isolamento não
+sobe.
+
+O `psh doctor` reprova com `workspace-enum` no primeiro caso, e os testes de
+integração se declaram `skip` no terceiro.
+
+O binário compilado por `bun run build` não tem nenhuma dessas limitações.
