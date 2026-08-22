@@ -320,6 +320,9 @@ O núcleo roda onde o Bun roda.
 O que depende de plataforma é como a fronteira de escrita é aplicada: Linux por
 bubblewrap e Landlock, macOS por seatbelt, Windows **somente via WSL2**.
 
+O CI cobre os três: Linux e macOS diretamente, e Windows dentro de um WSL2 real,
+que mede Landlock e bubblewrap antes de rodar a suíte.
+
 Windows nativo não tem como aplicar a fronteira pelo kernel, porque namespace de
 usuário e Landlock são construções do Linux.
 

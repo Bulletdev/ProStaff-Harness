@@ -135,13 +135,27 @@ O que depende de plataforma é **como a fronteira de escrita é aplicada**.
 |----------------------|----------------------------------------------|----------------------------------------|
 | Linux                | mount pelo kernel, via bubblewrap e Landlock | testado no CI e contra o binário real  |
 | macOS                | mount pelo kernel, via seatbelt              | testado no CI, sem o sandbox instalado |
-| Windows **via WSL2** | igual ao Linux                               | requisito declarado, sem CI próprio    |
+| Windows **via WSL2** | igual ao Linux                               | testado no CI, em WSL2 de verdade      |
 | Windows nativo       | nenhuma                                      | não suportado                          |
 
 **Windows exige WSL2.**
 
 Não é preguiça de portar: a fronteira precisa de namespace de usuário e de
 Landlock, que são construções do kernel Linux.
+
+O CI roda a suíte dentro de um WSL2 real, e mede o que aquele kernel oferece
+antes de rodar qualquer teste:
+
+```
+kernel:     Linux 6.18.33.2-microsoft-standard-WSL2
+landlock:   101 símbolos em kallsyms
+bwrap:      bubblewrap 0.9.0
+bwrap real: funciona
+```
+
+Ou seja, o WSL2 tem as primitivas necessárias.
+
+A linha da tabela acima é medição, não suposição.
 
 Fora do WSL2 o `psh` cai no modo degradado, que **detecta e reverte** escrita
 fora da fronteira em vez de impedir, e isso é uma garantia mais fraca.
