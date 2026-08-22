@@ -313,6 +313,19 @@ instalado na máquina.
 Sem isso o resultado mudaria conforme o ambiente, e um teste que depende de qual
 binário está instalado não é um teste confiável.
 
+## Plataformas
+
+O núcleo roda onde o Bun roda.
+
+O que depende de plataforma é como a fronteira de escrita é aplicada: Linux por
+bubblewrap e Landlock, macOS por seatbelt, Windows **somente via WSL2**.
+
+Windows nativo não tem como aplicar a fronteira pelo kernel, porque namespace de
+usuário e Landlock são construções do Linux.
+
+Nesse caso o `psh` cai no modo degradado, que reverte em vez de impedir, e diz
+isso no `psh status` e no `psh doctor`.
+
 ## Nota de ambiente
 
 Um `bun` instalado por snap roda confinado, e o confinamento aparece de três

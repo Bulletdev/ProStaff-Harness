@@ -110,21 +110,54 @@ saberia se a garantia existe.
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  01 · Instalação                                     │
-│  02 · Primeiros passos                               │
-│  03 · Como um portão decide                          │
-│  04 · Contrato de workflow                           │
-│  05 · Códigos de saída                               │
-│  06 · Integração com CI                              │
-│  07 · O que a v0.1 não faz                           │
-│  08 · Desenvolvimento                                │
-│  09 · Roadmap                                        │
+│  01 · Plataformas                                    │
+│  02 · Instalação                                     │
+│  03 · Primeiros passos                               │
+│  04 · Como um portão decide                          │
+│  05 · Contrato de workflow                           │
+│  06 · Códigos de saída                               │
+│  07 · Integração com CI                              │
+│  08 · O que o psh não faz                            │
+│  09 · Desenvolvimento                                │
+│  10 · Roadmap                                        │
 └──────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 01 · Instalação
+## 01 · Plataformas
+
+O núcleo (workflow, evidência, auditoria) roda onde o Bun roda.
+
+O que depende de plataforma é **como a fronteira de escrita é aplicada**.
+
+| Plataforma           | Fronteira                                    | Estado                                 |
+|----------------------|----------------------------------------------|----------------------------------------|
+| Linux                | mount pelo kernel, via bubblewrap e Landlock | testado no CI e contra o binário real  |
+| macOS                | mount pelo kernel, via seatbelt              | testado no CI, sem o sandbox instalado |
+| Windows **via WSL2** | igual ao Linux                               | requisito declarado, sem CI próprio    |
+| Windows nativo       | nenhuma                                      | não suportado                          |
+
+**Windows exige WSL2.**
+
+Não é preguiça de portar: a fronteira precisa de namespace de usuário e de
+Landlock, que são construções do kernel Linux.
+
+Fora do WSL2 o `psh` cai no modo degradado, que **detecta e reverte** escrita
+fora da fronteira em vez de impedir, e isso é uma garantia mais fraca.
+
+O modo aparece no `psh status`, no `psh doctor` e dentro de cada registro de
+evidência, nunca em silêncio.
+
+Sem sandbox instalado, em qualquer plataforma, o comportamento é o mesmo modo
+degradado declarado.
+
+Dá para trabalhar assim, mas quem impede a escrita passa a ser um snapshot, não
+o kernel.
+
+---
+
+## 02 · Instalação
 
 Requer [Bun](https://bun.sh/) 1.3 ou superior para compilar.
 
@@ -145,7 +178,7 @@ registro de evidência, nunca silencioso.
 
 ---
 
-## 02 · Primeiros passos
+## 03 · Primeiros passos
 
 ```sh
 psh init --profile lean   # detecta a stack, mostra o plano, pede confirmação
@@ -181,7 +214,7 @@ portão all-of: REPROVADO
 
 ---
 
-## 03 · Como um portão decide
+## 04 · Como um portão decide
 
 ```
 psh verify   ->  núcleo executa o verificador dentro do sandbox
@@ -210,7 +243,7 @@ O que isso impede, na prática:
 
 ---
 
-## 04 · Contrato de workflow
+## 05 · Contrato de workflow
 
 Fases, portões e verificadores ficam em `.harness/workflow.json`.
 
@@ -266,7 +299,7 @@ virar erro em runtime quando já é tarde.
 
 ---
 
-## 05 · Códigos de saída
+## 06 · Códigos de saída
 
 | Código | Significado                                         |
 |--------|-----------------------------------------------------|
@@ -280,7 +313,7 @@ virar erro em runtime quando já é tarde.
 
 ---
 
-## 06 · Integração com CI
+## 07 · Integração com CI
 
 ```yaml
 - name: portões de qualidade
@@ -313,32 +346,43 @@ Override é ato humano com confirmação, e CI não tem humano para confirmar.
 
 ---
 
-## 07 · O que a v0.1 não faz
+## 08 · O que o psh não faz
 
 Esta seção existe porque um harness que promete garantia que não tem é pior que
 não ter harness nenhum.
 
-- **Não impede um agente de escrever em `.harness/evidence/`.**
-  
-  Isso depende do motor de fronteira, que entra na 0.2.
-  
-  Hoje a proteção é convenção, não mecanismo, e o `psh doctor` declara
-  `fronteira ausente` em vez de sugerir o contrário.
+- **Sem sandbox, não impede: detecta e reverte.**
 
-- **Não exige sandbox.**
-  
-  O contrato de isolamento está implementado, mas sem `ai-jail` instalado o
-  modo é `degraded`.
-  
-  Isso aparece no estado, no diagnóstico e em cada registro de evidência.
+  A fronteira só é aplicada pelo kernel quando há um sandbox operante.
+
+  Fora disso o modo é `degraded`: snapshot antes, comparação depois, reversão do
+  que saiu da fronteira.
+
+  A diferença aparece no `psh status`, no `psh doctor` e em cada registro de
+  evidência.
+
+- **O mount não expressa arquivo novo em diretório gravável fora do escopo.**
+
+  A raiz do projeto permanece gravável, então uma entrada criada ali durante a
+  corrida escapa do kernel.
+
+  É o snapshot que fecha esse resíduo, e por isso ele continua ligado também no
+  modo enjaulado.
+
+- **Detecção de comando destrutivo não é proteção.**
+
+  `rm -rf`, `git reset --hard` e afins geram alerta na trilha, nunca bloqueio.
+
+  Casamento por texto erra nos dois sentidos, e tratar isso como controle criaria
+  confiança que o mecanismo não sustenta.
 
 - **Não gerencia modelo, custo ou memória entre sessões.**
-  
+
   Marcos posteriores.
 
 ---
 
-## 08 · Desenvolvimento
+## 09 · Desenvolvimento
 
 ```sh
 cd psh
@@ -369,7 +413,7 @@ Regras da suíte de testes:
 
 ---
 
-## 09 · Roadmap
+## 10 · Roadmap
 
 | Versão | Escopo                                                                        | Estado       |
 |--------|-------------------------------------------------------------------------------|--------------|
