@@ -5,7 +5,7 @@ import { runDoctor, renderDoctor, scanSecrets, type Check } from "../src/cli/doc
 import { openProject } from "../src/cli/context.ts";
 import { resetSandboxCache } from "../src/evidence/sandbox.ts";
 import type { WorkflowContract } from "../src/workflow/types.ts";
-import { cleanupTempProjects, GIT_AVAILABLE, harnessWith, run, tempProject, writeFile } from "./helpers.ts";
+import { cleanupTempProjects, GIT_AVAILABLE, harnessWith, run, SANDBOX_DE_TESTE, tempProject, writeFile } from "./helpers.ts";
 
 afterAll(cleanupTempProjects);
 
@@ -75,7 +75,9 @@ describe("psh doctor (R10.2, R10.2b)", () => {
       expect(renderDoctor(report)).toContain("avisos");
     } finally {
       ctx.close();
-      delete process.env.PSH_SANDBOX;
+      // Volta ao padrao da suite em vez de apagar: apagar faria os arquivos
+      // seguintes herdarem o ai-jail da maquina e reprovarem sem motivo.
+      process.env.PSH_SANDBOX = SANDBOX_DE_TESTE;
       resetSandboxCache();
     }
   });

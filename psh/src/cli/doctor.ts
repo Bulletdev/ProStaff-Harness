@@ -31,6 +31,8 @@ export function runDoctor(ctx: ProjectContext): DoctorReport {
   checks.push(checkSandbox());
   checks.push(...checkBoundaryEngine(ctx));
   checks.push(checkEnumeration(ctx));
+  const tmpAviso = checkProjetoNoTmp(ctx);
+  if (tmpAviso !== null) checks.push(tmpAviso);
   checks.push(checkAudit(ctx));
   checks.push(...checkVerifierExecutables(ctx));
   checks.push(...checkDeclaredFiles(ctx));
@@ -121,6 +123,22 @@ function checkBoundaryEngine(ctx: ProjectContext): Check[] {
     });
   }
   return out;
+}
+
+/**
+ * O ai-jail monta `/tmp` como tmpfs. Projeto que mora la fica invisivel dentro
+ * da jaula, e o sintoma e um comando que "roda" sem achar arquivo nenhum.
+ */
+function checkProjetoNoTmp(ctx: ProjectContext): Check | null {
+  if (detectSandbox().mode !== "ai-jail") return null;
+  if (!ctx.layout.root.startsWith("/tmp/") && ctx.layout.root !== "/tmp") return null;
+  return {
+    id: "projeto-em-tmp",
+    level: "fail",
+    message: "projeto em /tmp com ai-jail ativo: a jaula monta /tmp como tmpfs",
+    detail:
+      "Dentro do sandbox o diretorio aparece vazio, e o sintoma e comando que roda sem achar arquivo. Mova o projeto para fora de /tmp ou rode com PSH_SANDBOX=off.",
+  };
 }
 
 function checkAudit(ctx: ProjectContext): Check {

@@ -8,7 +8,7 @@ import {
   runSandboxed,
   type SandboxStatus,
 } from "../src/evidence/sandbox.ts";
-import { cleanupTempProjects, tempProject } from "./helpers.ts";
+import { cleanupTempProjects, SANDBOX_DE_TESTE, tempProject } from "./helpers.ts";
 
 afterAll(cleanupTempProjects);
 
@@ -23,6 +23,9 @@ afterEach(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+  // Volta ao padrao da suite, e nao ao que estava antes deste arquivo carregar:
+  // restaurar "ausente" faria os outros arquivos herdarem o ai-jail da maquina.
+  process.env.PSH_SANDBOX = SANDBOX_DE_TESTE;
   resetSandboxCache();
 });
 

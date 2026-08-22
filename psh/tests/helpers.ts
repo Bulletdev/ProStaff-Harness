@@ -12,6 +12,20 @@ import failureProtocol from "../src/workflow/profiles/failure-protocol.json" wit
 
 export const CLI_ENTRY = resolve(import.meta.dir, "..", "src", "index.ts");
 
+/**
+ * A suite roda em modo degradado por padrao, independente de haver um `ai-jail`
+ * instalado na maquina.
+ *
+ * Sem isto o resultado muda conforme o ambiente: o ai-jail monta `--tmpfs /tmp`,
+ * e os projetos temporarios destes testes vivem justamente em /tmp, entao
+ * ficam invisiveis dentro da jaula e 25 testes reprovam sem que nada tenha
+ * quebrado no produto.
+ *
+ * Teste que quer semantica de jaula injeta o `SandboxStatus` explicitamente.
+ */
+export const SANDBOX_DE_TESTE = "off";
+process.env.PSH_SANDBOX = SANDBOX_DE_TESTE;
+
 const created: string[] = [];
 
 /**
@@ -58,7 +72,13 @@ export function writeFile(layout: Layout, rel: string, content: string): string 
 }
 
 export function run(cmd: string, args: string[], cwd: string): { code: number; out: string; err: string } {
-  const res = spawnSync(cmd, args, { cwd, encoding: "utf8" });
+  // O env vai explicito: mutacao em process.env depois do boot nem sempre chega
+  // ao filho, e o modo de sandbox precisa ser o mesmo dentro e fora do processo.
+  const res = spawnSync(cmd, args, {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, PSH_SANDBOX: SANDBOX_DE_TESTE },
+  });
   return { code: res.status ?? -1, out: res.stdout ?? "", err: res.stderr ?? "" };
 }
 
