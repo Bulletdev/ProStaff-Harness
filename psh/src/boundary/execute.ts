@@ -13,7 +13,7 @@ import { sha256File } from "../util/hash.ts";
 import { normalizeRel } from "../util/globs.ts";
 import type { Layout } from "../util/paths.ts";
 import { detectSandbox, type SandboxStatus } from "../evidence/sandbox.ts";
-import type { BoundaryPolicy, Decision } from "./policy.ts";
+import { DENY_ALWAYS, type BoundaryPolicy, type Decision } from "./policy.ts";
 
 export type ViolationAction = "reverted" | "deleted" | "unrevertable";
 
@@ -54,6 +54,16 @@ const DEFAULT_BUDGET = 64 * 1024 * 1024;
 const SKIP_DIRS = new Set([".git", "node_modules", ".venv", "target", "dist"]);
 
 /**
+ * Arquivos que o proprio sandbox cria ou reescreve durante o setup.
+ *
+ * Sem esta excecao, o `.ai-jail` que o ai-jail grava na raiz aparece como
+ * "arquivo criado fora da fronteira" e vira violacao do agente. Acusar o
+ * mecanismo de isolamento de violar a fronteira que ele esta aplicando polui o
+ * relatorio e treina quem le a ignorar violacao de verdade.
+ */
+const ARQUIVOS_DO_SANDBOX = new Set([".ai-jail"]);
+
+/**
  * Executa um comando sob a fronteira do agente.
  *
  * R3.1 camada 1, quando o ai-jail existe: montagem de escrita restrita aos
@@ -70,33 +80,15 @@ export function execUnderBoundary(opts: ExecOptions): ExecResult {
   const timeout = (opts.timeout_s ?? 900) * 1000;
   const env = opts.env ?? herdarAmbiente();
 
-  if (sandbox.mode === "ai-jail" && sandbox.jail_bin !== null) {
-    const argv = montarArgvEnjaulado(opts, sandbox.jail_bin);
-    const r = spawnSync(argv[0]!, argv.slice(1), {
-      cwd,
-      env,
-      encoding: "utf8",
-      timeout,
-      killSignal: "SIGKILL",
-      maxBuffer: 32 * 1024 * 1024,
-    });
-    return {
-      mode: "ai-jail",
-      exit_code: r.status ?? null,
-      signal: r.signal ?? null,
-      stdout: r.stdout ?? "",
-      stderr: r.stderr ?? "",
-      timed_out: erroDeTimeout(r.error),
-      spawn_error: erroDeSpawn(r.error),
-      violations: [],
-      snapshot: null,
-    };
-  }
+  const enjaulado = sandbox.mode === "ai-jail" && sandbox.jail_bin !== null;
+  const argv = enjaulado ? montarArgvEnjaulado(opts, sandbox.jail_bin!) : opts.argv;
 
-  // Modo degradado (ou sessao ja enjaulada, que tambem nao remonta nada).
+  // O snapshot roda nos dois modos. Com mount, ele so encontra o residuo que a
+  // montagem por complemento nao consegue expressar; sem mount, ele e o unico
+  // controle. Em nenhum dos dois o resultado e silencioso.
   const snapshot = tirarSnapshot(opts, opts.backupBudgetBytes ?? DEFAULT_BUDGET);
   try {
-    const r = spawnSync(opts.argv[0]!, opts.argv.slice(1), {
+    const r = spawnSync(argv[0]!, argv.slice(1), {
       cwd,
       env,
       encoding: "utf8",
@@ -273,26 +265,76 @@ function aplicarModificacao(abs: string, rel: string, decisao: Decision, snapsho
 }
 
 /**
- * R3.1 camada 1: escrita liberada exatamente nos paths do agente, resto
- * somente leitura. Os defaults do R3.4 vao junto e nao sao negociaveis aqui.
+ * R3.1 camada 1: montagem.
+ *
+ * O ai-jail entrega o projeto gravavel e restringe por `--deny-path`. Nao da
+ * para montar a raiz somente leitura e reabrir o escopo por cima: ele recusa
+ * `--rw-map` que se sobrepoe a um `--map` read-only, e negar a raiz inteira
+ * quebra o proprio setup do bwrap. Medido contra o binario 1.19.2.
+ *
+ * Entao a montagem e por complemento: nega tudo que existe e nao esta na
+ * allowlist do agente, descendo so por onde a allowlist aponta.
+ *
+ * O que o mount nao alcanca: entrada criada durante a corrida dentro de um
+ * diretorio gravavel que nao estava na allowlist. Por isso o snapshot continua
+ * ligado tambem no modo enjaulado (R3.1 camada 2).
  */
 export function montarArgvEnjaulado(opts: ExecOptions, jailBin: string): string[] {
   const agente = opts.policy.agent(opts.agentId);
   const args = [jailBin, "--no-agent-state", "--no-docker", "--no-ssh"];
   args.push(agente?.network === true ? "--network" : "--no-network");
 
-  // Projeto inteiro somente leitura, e so os paths do agente voltam como rw.
-  args.push("--map", opts.layout.root);
-  for (const padrao of agente?.write?.patterns ?? []) {
-    args.push("--rw-map", join(opts.layout.root, diretorioBase(padrao)));
-  }
-  // O que decide portao nunca e montado como escrita, mesmo que um glob amplo
-  // do agente cubra o caminho.
-  for (const proibido of [".harness", ".git"]) {
-    args.push("--deny-path", join(opts.layout.root, proibido));
-  }
+  for (const abs of caminhosNegados(opts)) args.push("--deny-path", abs);
   args.push("--", ...opts.argv);
   return args;
+}
+
+/** Complemento da allowlist: o que existe hoje e o agente nao pode escrever. */
+export function caminhosNegados(opts: ExecOptions): string[] {
+  const agente = opts.policy.agent(opts.agentId);
+  // Base "." vem de allowlist `**` e nao delimita nada, entao sai da conta.
+  const escopo = (agente?.write?.patterns ?? []).map(diretorioBase).filter((b) => b !== ".");
+  const duro = DENY_ALWAYS.map(diretorioBase);
+  const abaixo = (bases: string[], rel: string) => bases.some((b) => b.startsWith(`${rel}/`));
+  const negados: string[] = [];
+
+  const visita = (rel: string): void => {
+    const abs = rel === "" ? opts.layout.root : join(opts.layout.root, rel);
+    let entradas;
+    try {
+      entradas = readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entradas) {
+      const filho = rel === "" ? e.name : `${rel}/${e.name}`;
+      // O proprio ai-jail precisa escrever este arquivo no setup.
+      if (filho === ".ai-jail") continue;
+      const permitido = opts.policy.canWrite(opts.agentId, filho).allowed;
+
+      if (e.isDirectory()) {
+        // Ha escopo do agente aqui dentro: precisa descer para nao negar junto.
+        if (abaixo(escopo, filho)) {
+          visita(filho);
+          continue;
+        }
+        // Diretorio liberado, mas pode guardar deny duro mais fundo.
+        if (permitido || escopo.includes(filho)) {
+          if (abaixo(duro, filho)) visita(filho);
+          continue;
+        }
+        // Nada do escopo aqui: nega a subarvore inteira, de uma vez.
+        negados.push(join(opts.layout.root, filho));
+        continue;
+      }
+
+      if (permitido) continue;
+      negados.push(join(opts.layout.root, filho));
+    }
+  };
+
+  visita("");
+  return negados.sort();
 }
 
 /** `src/api/**` vira `src/api`: mount trabalha com diretorio, nao com glob. */
@@ -327,6 +369,7 @@ function caminhar(root: string): string[] {
         continue;
       }
       if (e.isSymbolicLink()) continue;
+      if (ARQUIVOS_DO_SANDBOX.has(rel)) continue;
       out.push(rel);
     }
   }

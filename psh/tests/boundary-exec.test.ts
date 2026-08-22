@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BoundaryPolicy, type BoundaryContract } from "../src/boundary/policy.ts";
-import { diretorioBase, execUnderBoundary, montarArgvEnjaulado } from "../src/boundary/execute.ts";
+import { caminhosNegados, diretorioBase, execUnderBoundary, montarArgvEnjaulado } from "../src/boundary/execute.ts";
 import type { SandboxStatus } from "../src/evidence/sandbox.ts";
 import { cleanupTempProjects, GIT_AVAILABLE, run, tempProject, writeFile } from "./helpers.ts";
 import type { Layout } from "../src/util/paths.ts";
@@ -219,7 +219,7 @@ describe("o executor nao decide veredito, so aplica fronteira", () => {
 });
 
 describe("montagem para o ai-jail (R3.1 camada 1, R3.4)", () => {
-  test("projeto entra somente leitura e so o escopo do agente volta como rw", () => {
+  test("nega o que existe fora da allowlist e desce so por onde ela aponta", () => {
     const { layout, policy } = cenario();
     const argv = montarArgvEnjaulado(
       { layout, policy, agentId: "backend", argv: ["sh", "-c", "true"] },
@@ -231,26 +231,53 @@ describe("montagem para o ai-jail (R3.1 camada 1, R3.4)", () => {
     expect(argv).toContain("--no-ssh");
     expect(argv).toContain("--no-network");
 
-    const roMap = argv[argv.indexOf("--map") + 1];
-    expect(roMap).toBe(layout.root);
-    const rwMap = argv[argv.indexOf("--rw-map") + 1];
-    expect(rwMap).toBe(join(layout.root, "src/api"));
+    const negados = argv.reduce<string[]>((acc, a, i) => (a === "--deny-path" ? [...acc, argv[i + 1]!] : acc), []);
+    // Desceu em src/ porque a allowlist aponta para src/api.
+    expect(negados).toContain(join(layout.root, "src/web"));
+    expect(negados).toContain(join(layout.root, "README.md"));
+    expect(negados).toContain(join(layout.root, ".harness"));
+    // E nao negou o escopo do agente.
+    expect(negados).not.toContain(join(layout.root, "src/api"));
+    expect(negados).not.toContain(join(layout.root, "src"));
   });
 
-  test("o que decide portao entra como deny-path mesmo com glob amplo do agente", () => {
-    const layout = tempProject({ git: false });
+  test("o .ai-jail que o sandbox grava nao vira violacao do agente", () => {
+    const { layout, policy } = cenario();
+    const bin = join(layout.root, "jail-que-escreve");
+    // Wrapper que imita o ai-jail: grava o proprio .ai-jail antes de executar.
+    writeFileSync(
+      bin,
+      '#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\necho config > "$(dirname "$0")/.ai-jail"\nexec "$@"\n',
+      { mode: 0o755 },
+    );
+    const r = execUnderBoundary({
+      layout,
+      policy,
+      agentId: "backend",
+      argv: ["sh", "-c", "true"],
+      sandbox: { mode: "ai-jail", detail: "falso", jail_bin: bin, jail_version: "1" },
+    });
+    expect(r.violations).toEqual([]);
+  });
+
+  test("o arquivo de configuracao do proprio ai-jail nao entra no deny", () => {
+    const { layout, policy } = cenario();
+    writeFile(layout, ".ai-jail", "config\n");
+    const negados = caminhosNegados({ layout, policy, agentId: "backend", argv: ["true"] });
+    expect(negados.some((n) => n.endsWith("/.ai-jail"))).toBe(false);
+  });
+
+  test("agente com allowlist ampla nega so o deny duro", () => {
+    const { layout } = cenario();
     const guloso = new BoundaryPolicy(
       { _type: "psh-boundary", version: 1, agents: { tudo: { write: ["**"] } } },
       layout,
       [join(layout.root, "vendor")],
     );
-    const argv = montarArgvEnjaulado(
-      { layout, policy: guloso, agentId: "tudo", argv: ["true"] },
-      "/bin/ai-jail",
-    );
-    const denies = argv.reduce<string[]>((acc, a, i) => (a === "--deny-path" ? [...acc, argv[i + 1]!] : acc), []);
-    expect(denies).toContain(join(layout.root, ".harness"));
-    expect(denies).toContain(join(layout.root, ".git"));
+    const negados = caminhosNegados({ layout, policy: guloso, agentId: "tudo", argv: ["true"] });
+    // `.harness` em si e gravavel para ele, mas o que decide portao la dentro nao.
+    expect(negados).toContain(join(layout.root, ".harness/evidence"));
+    expect(negados).not.toContain(join(layout.root, "src/web"));
   });
 
   test("rede so aparece quando o agente declara", () => {
@@ -285,8 +312,8 @@ describe("montagem para o ai-jail (R3.1 camada 1, R3.4)", () => {
     });
     expect(r.exit_code).toBe(9);
     expect(r.mode).toBe("ai-jail");
-    // Com mount de verdade nao ha o que reverter: quem impede e o kernel.
-    expect(r.violations).toEqual([]);
-    expect(r.snapshot).toBeNull();
+    // O snapshot continua ligado no modo enjaulado: a montagem por complemento
+    // nao expressa entrada criada durante a corrida em diretorio gravavel.
+    expect(r.snapshot).not.toBeNull();
   });
 });
