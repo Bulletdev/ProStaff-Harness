@@ -134,7 +134,7 @@ describe.skipIf(!JAIL_OK)("fronteira aplicada pelo kernel, com ai-jail real", ()
     expect(r.violations[0]!.action).toBe("deleted");
   });
 
-  test("o .ai-jail que o proprio sandbox grava nao vira violacao do agente", () => {
+  test("corrida limpa nao inventa violacao", () => {
     const { layout, policy } = projetoForaDoTmp();
     const r = comJaula(layout, policy, "true");
     expect(r.violations).toEqual([]);
@@ -145,5 +145,45 @@ describe.skipIf(!JAIL_OK)("fronteira aplicada pelo kernel, com ai-jail real", ()
     // Sem rede a resolucao de nome falha; o teste so exige que nao tenha sucesso.
     const r = comJaula(layout, policy, "getent hosts example.com >/dev/null 2>&1");
     expect(r.exit_code).not.toBe(0);
+  });
+});
+
+describe.skipIf(!JAIL_OK)("a jaula e montada so a partir do contrato do psh", () => {
+  test("nenhum arquivo de configuracao e deixado no projeto", () => {
+    const { layout, policy } = projetoForaDoTmp();
+    comJaula(layout, policy, "true");
+    // Por padrao o ai-jail grava um `.ai-jail` na raiz e o le na proxima
+    // corrida. O arquivo mora dentro da arvore que o agente edita, e a fronteira
+    // nao pode depender, nem em parte, de algo que o enjaulado escreve.
+    expect(existsSync(join(layout.root, ".ai-jail"))).toBe(false);
+  });
+
+  test("a segunda corrida enjaula igual a primeira", () => {
+    const { layout, policy } = projetoForaDoTmp();
+    for (const tentativa of [1, 2, 3]) {
+      const r = comJaula(layout, policy, `echo invadido-${tentativa} > src/web/app.tsx`);
+      expect(r.exit_code).not.toBe(0);
+      expect(ler(layout, "src/web/app.tsx")).toBe("web original\n");
+      expect(r.stderr).not.toContain("rule not applied");
+    }
+  });
+
+  test("configuracao plantada na raiz nao muda a fronteira", () => {
+    const { layout, policy } = projetoForaDoTmp();
+    writeFileSync(
+      join(layout.root, ".ai-jail"),
+      'command = ["true"]\ndeny_paths = []\nnetwork = true\n',
+    );
+    const r = comJaula(layout, policy, "echo invadido > src/web/app.tsx");
+    expect(r.exit_code).not.toBe(0);
+    expect(ler(layout, "src/web/app.tsx")).toBe("web original\n");
+  });
+
+  test("o id do agente atravessa a jaula, que zera o ambiente do filho", () => {
+    const { layout, policy } = projetoForaDoTmp();
+    // Medido contra o 1.19.2: sem `--env` explicito no argv, `PSH_AGENT` chega
+    // vazio la dentro e `psh remember` do agente nasceria assinado como humano.
+    const r = comJaula(layout, policy, 'printf "[%s]" "$PSH_AGENT"');
+    expect(r.stdout).toContain("[backend]");
   });
 });

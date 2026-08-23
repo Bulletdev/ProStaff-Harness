@@ -56,12 +56,20 @@ const SKIP_DIRS = new Set([".git", "node_modules", ".venv", "target", "dist"]);
 /**
  * Arquivos que o proprio sandbox cria ou reescreve durante o setup.
  *
- * Sem esta excecao, o `.ai-jail` que o ai-jail grava na raiz aparece como
- * "arquivo criado fora da fronteira" e vira violacao do agente. Acusar o
- * mecanismo de isolamento de violar a fronteira que ele esta aplicando polui o
- * relatorio e treina quem le a ignorar violacao de verdade.
+ * O conjunto esta vazio desde que o argv passou a levar `--no-save-config`: o
+ * ai-jail nao grava mais o `.ai-jail` na raiz, entao nao ha o que perdoar. E
+ * bom que esteja vazio - enquanto o arquivo era escrito pelo sandbox, uma
+ * copia dele feita pelo agente tambem passava sem virar violacao.
  */
-const ARQUIVOS_DO_SANDBOX = new Set([".ai-jail"]);
+const ARQUIVOS_DO_SANDBOX = new Set<string>();
+
+/**
+ * Marca de quem esta rodando o comando.
+ *
+ * Acao tomada por comando do agente precisa nascer assinada como agente, e nao
+ * como o operador dono do terminal (R4.3).
+ */
+export const PSH_AGENT_ENV = "PSH_AGENT";
 
 /**
  * Executa um comando sob a fronteira do agente.
@@ -78,7 +86,10 @@ export function execUnderBoundary(opts: ExecOptions): ExecResult {
   const sandbox = opts.sandbox ?? detectSandbox();
   const cwd = opts.cwd ?? opts.layout.root;
   const timeout = (opts.timeout_s ?? 900) * 1000;
-  const env = opts.env ?? herdarAmbiente();
+  // Quem chama o psh de dentro daqui e o agente, nao o operador. Sem esta marca
+  // a trilha passaria a afirmar que um humano fez o que o agente fez.
+  // No modo enjaulado ela vai tambem no argv, porque a jaula zera o ambiente.
+  const env = { ...(opts.env ?? herdarAmbiente()), [PSH_AGENT_ENV]: opts.agentId };
 
   const enjaulado = sandbox.mode === "ai-jail" && sandbox.jail_bin !== null;
   const argv = enjaulado ? montarArgvEnjaulado(opts, sandbox.jail_bin!) : opts.argv;
@@ -281,8 +292,27 @@ function aplicarModificacao(abs: string, rel: string, decisao: Decision, snapsho
  */
 export function montarArgvEnjaulado(opts: ExecOptions, jailBin: string): string[] {
   const agente = opts.policy.agent(opts.agentId);
-  const args = [jailBin, "--no-agent-state", "--no-docker", "--no-ssh"];
+  // `--clean --no-save-config`, medido contra o ai-jail 1.19.2.
+  //
+  // Por padrao o ai-jail grava um `.ai-jail` na raiz do projeto e o le na
+  // execucao seguinte. O arquivo fica dentro da arvore que o agente edita, e a
+  // fronteira passaria a depender, em parte, de um arquivo que o proprio
+  // enjaulado escreve - o mesmo erro que o G4 aponta no harness de referencia.
+  //
+  // Na pratica ele tambem acumulava lixo: cada corrida somava os deny paths de
+  // novo, guardados na forma `~/...`, e o ai-jail os reabria como
+  // `<raiz>/~/...`, avisando "rule not applied" para regra que nao existia. A
+  // regra que vale continua sendo a do argv, mas o ruido escondia o aviso de
+  // verdade.
+  //
+  // Com as duas flags a jaula e montada so a partir do contrato do psh.
+  const args = [jailBin, "--clean", "--no-save-config", "--no-agent-state", "--no-docker", "--no-ssh"];
   args.push(agente?.network === true ? "--network" : "--no-network");
+  // Medido contra o ai-jail 1.19.2: a jaula zera o ambiente do filho, entao
+  // `PSH_AGENT` no env do spawn chega vazio la dentro e a acao do agente
+  // voltaria a ser registrada como acao de humano. O valor vai explicito no
+  // argv, e nao por heranca, para nao depender do ambiente de fora.
+  args.push("--env", `${PSH_AGENT_ENV}=${opts.agentId}`);
 
   for (const abs of caminhosNegados(opts)) args.push("--deny-path", abs);
   args.push("--", ...opts.argv);
@@ -308,8 +338,6 @@ export function caminhosNegados(opts: ExecOptions): string[] {
     }
     for (const e of entradas) {
       const filho = rel === "" ? e.name : `${rel}/${e.name}`;
-      // O proprio ai-jail precisa escrever este arquivo no setup.
-      if (filho === ".ai-jail") continue;
       const permitido = opts.policy.canWrite(opts.agentId, filho).allowed;
 
       if (e.isDirectory()) {

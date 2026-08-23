@@ -216,7 +216,7 @@ perfil        lean
 fase          phase.5.build - Build + Quality
 tentativa     2 (retries 1/2)
 status        in-progress
-sandbox       ai-jail 0.10.0 operante
+sandbox       ai-jail 1.19.2 operante
 fronteira     ausente (C3 entra na v0.2)
 trilha        íntegra (47 entradas, 0 problemas)
 

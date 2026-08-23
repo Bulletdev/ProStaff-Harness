@@ -4,6 +4,46 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [Não lançado]
+
+Endurecimento do motor de fronteira (C3), medido contra o `ai-jail` 1.19.2.
+
+### Corrigido
+
+- **O `ai-jail` gravava a própria configuração dentro do projeto.**
+
+  Por padrão ele escreve um `.ai-jail` na raiz e o lê na execução seguinte. O
+  arquivo mora na árvore que o agente edita, e parte da montagem passaria a vir
+  de algo que o próprio enjaulado escreve, que é exatamente o G4.
+
+  Na prática ele também acumulava lixo: cada corrida somava os `deny_paths` de
+  novo, guardados como `~/...`, e o `ai-jail` os reabria como `<raiz>/~/...`,
+  avisando `rule not applied` para regra que não existia. A regra que valia
+  continuava sendo a do argv, medido, mas o ruído escondia o aviso de verdade.
+
+  O argv passou a levar `--clean --no-save-config`. A jaula é montada só a
+  partir do contrato do `psh`.
+
+- **O `.ai-jail` estava fora do relatório de violação.**
+
+  A exceção existia porque o sandbox escrevia o arquivo. Com a escrita
+  desligada, ela só servia para deixar passar uma cópia feita pelo agente. O
+  conjunto de arquivos perdoados ficou vazio, e o arquivo entra no deny como
+  qualquer outro.
+
+- **A jaula zera o ambiente do processo filho.**
+
+  `PSH_AGENT` no `env` do spawn chega vazio lá dentro. A marca de qual agente
+  está executando vai explícita no argv, por `--env`, para que o núcleo saiba
+  quem pediu a ação também dentro da jaula.
+
+### Qualidade
+
+- Quatro casos novos na suíte de integração com a jaula real: nenhuma
+  configuração deixada no projeto, a terceira corrida enjaula igual à primeira,
+  configuração plantada na raiz não muda a fronteira, e o id do agente atravessa
+  a jaula.
+
 ## [0.2.0] - 2026-08-22
 
 Motor de fronteira (C3).
