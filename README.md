@@ -15,7 +15,7 @@
 [![TypeScript](https://img.shields.io/badge/typescript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white)](https://sqlite.org/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-orange.svg)](CHANGELOG.md)
 
 </div>
 
@@ -31,7 +31,7 @@
 ║  Cobertura, teste, lint e segurança viram registro assinado por hash da      ║
 ║  árvore que foi verificada.                                                  ║
 ║                                                                              ║
-║  v0.2.0 · fronteira aplicada pelo kernel · 325 testes · binário único        ║
+║  v0.3.0 · memória entre sessões · adapter Claude Code · 506 testes           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -99,6 +99,11 @@ saberia se a garantia existe.
 │  [■] Adapter CI          - headless, JSON, código de saída estável          │
 │  [■] psh doctor          - diagnóstico fora do runtime, colável em issue    │
 │  [■] Binário único       - bun build --compile, sem runtime instalado       │
+│  [■] Boundary Engine     - allowlist por agente, aplicada pelo kernel       │
+│  [■] Memory Engine       - página em disco, índice FTS5, frescor por hash   │
+│  [■] psh handoff         - retomada montada do estado, não de resumo        │
+│  [■] Consolidação        - a sessão vira página, cada linha com a origem    │
+│  [■] Adapter Claude Code - cinco hooks, contrato lido do binário instalado  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -201,6 +206,13 @@ psh status                # fase, tentativa, portão, sandbox, trilha
 psh advance               # avalia o portão e decide a transição
 psh audit verify          # integridade da trilha encadeada
 psh doctor                # diagnóstico completo
+
+psh remember "<fato>"     # fixa o que não pode ser perdido entre sessões
+psh memory search <termo> # busca na memória do projeto
+psh handoff               # bloco de retomada, pronto para a próxima sessão
+
+psh adapter claude-code install   # registra os cinco hooks em .claude/
+psh adapter claude-code contract  # confere o contrato contra o binário instalado
 ```
 
 `psh init` é não destrutivo.
@@ -217,7 +229,7 @@ fase          phase.5.build - Build + Quality
 tentativa     2 (retries 1/2)
 status        in-progress
 sandbox       ai-jail 1.19.2 operante
-fronteira     ausente (C3 entra na v0.2)
+fronteira     mount (2 agentes)
 trilha        íntegra (47 entradas, 0 problemas)
 
 portão all-of: REPROVADO
@@ -390,9 +402,33 @@ não ter harness nenhum.
   Casamento por texto erra nos dois sentidos, e tratar isso como controle criaria
   confiança que o mecanismo não sustenta.
 
-- **Não gerencia modelo, custo ou memória entre sessões.**
+- **A memória não é fonte canônica.**
 
-  Marcos posteriores.
+  A faixa em `.harness/memory/` é transitória e fica fora do repositório. O que
+  precisa sobreviver com garantia sai dela por `psh memory promote` e vira
+  arquivo versionado, que entra em revisão como qualquer outro.
+
+- **A página de sessão não é narrativa escrita por modelo.**
+
+  Ela é montada da trilha, com o número da entrada em cada linha. A reescrita
+  como narrativa que o R5.2 pede é chamada de modelo e depende do Maestro, que é
+  a v0.4.
+
+- **O adapter não expõe as tools do núcleo por MCP.**
+
+  O agente fala com o harness por linha de comando. O servidor MCP é marco
+  posterior.
+
+- **A atribuição de quem fez o quê é melhor esforço dentro da jaula.**
+
+  `psh exec` marca a sessão com o id do agente, mas o agente roda com ambiente
+  próprio e pode apagar a marca antes de chamar o `psh`. O que ele não apaga é a
+  entrada `command.exec` da mesma execução na trilha, e é por ela que a
+  correlação fecha.
+
+- **Não gerencia modelo nem custo.**
+
+  Maestro e contabilidade de token são marcos posteriores.
 
 ---
 
@@ -401,7 +437,7 @@ não ter harness nenhum.
 ```sh
 cd psh
 bun run check      # typecheck + verificação estática + testes com cobertura
-bun test           # 236 testes
+bun test           # 506 testes
 bun run build      # binário único
 ```
 
@@ -411,7 +447,8 @@ bun run build      # binário único
 │  psh/src/evidence    execução de verificador, extratores, frescor        │
 │  psh/src/gate        avaliação de portão sobre evidência                 │
 │  psh/src/audit       trilha encadeada por hash                           │
-│  psh/src/adapters    ci (headless)                                       │
+│  psh/src/memory      página, índice FTS5, handoff, consolidação          │
+│  psh/src/adapters    ci (headless) e claude-code (cinco hooks)           │
 │  psh/schemas         contratos de dados versionados                      │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -433,7 +470,7 @@ Regras da suíte de testes:
 |--------|-------------------------------------------------------------------------------|--------------|
 | 0.1    | Núcleo verificável: workflow, evidência, auditoria, CLI, adapter CI           | **entregue** |
 | 0.2    | Motor de fronteira, integração com ai-jail, modo degradado, suíte adversarial | **entregue** |
-| 0.3    | Adapter Claude Code e memória entre sessões                                   | planejado    |
+| 0.3    | Adapter Claude Code e memória entre sessões                                   | **entregue** |
 | 0.4    | Roteamento de modelo, contabilidade de token e custo                          | planejado    |
 | 0.5    | Adapter OpenCode, perfis por stack                                            | planejado    |
 | 1.0    | Endurecimento, binários assinados, matriz de CI completa                      | planejado    |

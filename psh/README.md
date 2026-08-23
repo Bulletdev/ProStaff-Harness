@@ -22,9 +22,12 @@ editando.
 |--------------------|----------------------------------------------------------|----------|
 | C1 Workflow engine | R1.1 a R1.6                                              | completo |
 | C2 Evidence engine | R2.1 a R2.7, mais R2.10 a R2.14                          | completo |
+| C3 Boundary engine | R3.1 a R3.6                                              | completo |
 | C4 Audit engine    | R4.1 a R4.3                                              | completo |
+| C5 Memory engine   | R5.1, R5.3 a R5.5, R5.7; R5.2 sem a narrativa por LLM     | parcial  |
+| C8 Adapters        | R8.1, R8.2, R8.2b, R8.6b a R8.6g; sem MCP e sem R8.7     | parcial  |
 | CLI                | `init`, `status`, `verify`, `advance`, `audit`, `doctor` | completo |
-| Adapter            | `ci` (headless)                                          | completo |
+| Adapter            | `ci` (headless) e `claude-code` (cinco hooks)            | completo |
 
 Dois comandos além do mínimo declarado no roadmap, porque sem eles o marco não
 fecha sozinho:

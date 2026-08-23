@@ -4,7 +4,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
-## [Não lançado]
+## [0.3.0] - 2026-08-23
 
 Motor de memória (C5) e adapter `claude-code` (C8), que é a v0.3 inteira.
 
