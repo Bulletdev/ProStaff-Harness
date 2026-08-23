@@ -106,6 +106,14 @@ export interface MarcoNoDigest {
   seq: number;
 }
 
+export interface PedidoNoDigest {
+  texto: string | null;
+  chars: number;
+  truncated: boolean;
+  redacted: boolean;
+  seq: number;
+}
+
 export interface SessionDigest {
   /** Faixa de entradas da trilha que virou esta pagina. */
   from_seq: number;
@@ -115,6 +123,7 @@ export interface SessionDigest {
   /** R2.13: quantas entradas foram examinadas, nao so as que viraram linha. */
   entries_examined: number;
   marcos: MarcoNoDigest[];
+  pedidos: PedidoNoDigest[];
   fases: FaseNoDigest[];
   verificadores: VerificadorNoDigest[];
   anotacoes: AnotacaoNoDigest[];
@@ -146,6 +155,7 @@ export function buildDigest(entries: readonly AuditEntry[]): SessionDigest {
     finished_at: entries.at(-1)?.ts ?? "",
     entries_examined: entries.length,
     marcos: [],
+    pedidos: [],
     fases: [],
     verificadores: [],
     anotacoes: [],
@@ -244,6 +254,28 @@ export function buildDigest(entries: readonly AuditEntry[]): SessionDigest {
         digest.marcos.push({ descricao: `harness inicializado: perfil ${perfil}, stack ${stack}`, seq: entry.seq });
         break;
       }
+      case "adapter.event": {
+        const evento = texto(p.event);
+        const motivo = texto(p.reason);
+        digest.marcos.push({
+          descricao:
+            evento === "SessionStart"
+              ? `sessao aberta pelo adapter (${texto(p.source) ?? "origem nao declarada"}), ${numero(p.injected_chars) ?? 0} caracteres injetados`
+              : `sessao encerrada pelo adapter${motivo === null ? "" : ` (${motivo})`}`,
+          seq: entry.seq,
+        });
+        break;
+      }
+      case "prompt.submit": {
+        digest.pedidos.push({
+          texto: texto(p.text),
+          chars: numero(p.chars) ?? 0,
+          truncated: p.truncated === true,
+          redacted: p.redacted === true,
+          seq: entry.seq,
+        });
+        break;
+      }
       case "human.approval": {
         digest.decisoes.push({
           tipo: "aprovacao",
@@ -304,6 +336,19 @@ export function narrarDaTrilha(digest: SessionDigest): string {
     l.push("## Marcos");
     l.push("");
     for (const m of digest.marcos) l.push(`- \`#${m.seq}\` ${m.descricao}`);
+    l.push("");
+  }
+
+  if (digest.pedidos.length > 0) {
+    l.push("## Pedidos do usuario");
+    l.push("");
+    for (const pedido of digest.pedidos) {
+      const corpo =
+        pedido.texto === null
+          ? `(nao registrado: o prompt trazia marcador de segredo, ${pedido.chars} caracteres)`
+          : primeiraLinhaDoPedido(pedido.texto) + (pedido.truncated ? " (cortado)" : "");
+      l.push(`- \`#${pedido.seq}\` ${corpo}`);
+    }
     l.push("");
   }
 
@@ -390,6 +435,11 @@ export function narrarDaTrilha(digest: SessionDigest): string {
   return l.join("\n");
 }
 
+function primeiraLinhaDoPedido(texto: string, limite = 160): string {
+  const linha = texto.split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
+  return linha.length <= limite ? linha : `${linha.slice(0, limite - 3).trimEnd()}...`;
+}
+
 export function tituloDoDigest(digest: SessionDigest): string {
   const dia = digest.started_at.slice(0, 10);
   const fase = digest.fases.at(-1);
@@ -398,6 +448,9 @@ export function tituloDoDigest(digest: SessionDigest): string {
   }
   if (digest.verificadores.length > 0) {
     return `Sessao de ${dia}: ${digest.verificadores.length} verificacao(oes)`;
+  }
+  if (digest.pedidos.length > 0) {
+    return `Sessao de ${dia}: ${digest.pedidos.length} pedido(s) do usuario`;
   }
   return `Sessao de ${dia}: ${digest.entries_examined} entrada(s) na trilha`;
 }

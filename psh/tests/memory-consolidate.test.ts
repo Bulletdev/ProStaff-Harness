@@ -121,6 +121,52 @@ describe("digest: cada linha sai de uma entrada da trilha", () => {
     expect(digest.anotacoes[0]!.promoted_to).toBe("docs/decisoes/decisao.md");
   });
 
+  test("o pedido do usuario, capturado pelo adapter, vira secao da pagina (R5.1)", () => {
+    const digest = buildDigest([
+      entrada(1, "adapter.event", "adapter:claude-code", {
+        event: "SessionStart",
+        source: "startup",
+        injected_chars: 900,
+      }),
+      entrada(2, "prompt.submit", "human:sessao", {
+        text: "arruma o endpoint de login\ne roda os testes",
+        chars: 42,
+        truncated: false,
+        redacted: false,
+      }),
+      entrada(3, "prompt.submit", "human:sessao", { text: null, chars: 55, truncated: false, redacted: true }),
+      entrada(4, "adapter.event", "adapter:claude-code", { event: "SessionEnd", reason: "clear" }),
+    ]);
+
+    expect(digest.pedidos).toHaveLength(2);
+    expect(digest.marcos).toHaveLength(2);
+    // Evento do proprio adapter nao pode cair em "esta versao nao resume":
+    // a consolidacao ficaria cega justo para o que o adapter acabou de gravar.
+    expect(digest.nao_classificadas).toEqual({});
+
+    const texto = narrarDaTrilha(digest);
+    expect(texto).toContain("## Pedidos do usuario");
+    expect(texto).toContain("arruma o endpoint de login");
+    expect(texto).toContain("marcador de segredo");
+    expect(texto).toContain("sessao aberta pelo adapter (startup)");
+    expect(texto).toContain("sessao encerrada pelo adapter (clear)");
+    expect(tituloDoDigest(digest)).toContain("2 pedido(s)");
+  });
+
+  test("pedido longo entra pela primeira linha, com o corte declarado", () => {
+    const digest = buildDigest([
+      entrada(1, "prompt.submit", "human:sessao", {
+        text: "a".repeat(300),
+        chars: 5000,
+        truncated: true,
+        redacted: false,
+      }),
+    ]);
+    const texto = narrarDaTrilha(digest);
+    expect(texto).toContain("...");
+    expect(texto).toContain("(cortado)");
+  });
+
   test("promocao de pagina antiga entra sozinha, sem inventar anotacao nova", () => {
     const digest = buildDigest([
       entrada(1, "memory.promote", "human:x", { slug: "de-outra-sessao", to: "docs/decisoes/x.md" }),

@@ -6,14 +6,11 @@ Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
-Motor de memória (C5), primeira metade da v0.3.
+Motor de memória (C5) e adapter `claude-code` (C8), que é a v0.3 inteira.
 
-Falta a outra metade para publicar: a captura de **prompt do usuário** (R5.1)
-depende dos hooks do adapter `claude-code`, e a reescrita da página de sessão
-como narrativa (R5.2) depende do Maestro.
-
-O resto da captura já existe sem adapter nenhum, porque a trilha de auditoria
-sempre registrou decisão de fase, resultado de verificador e anotação.
+Falta para publicar apenas a reescrita da página de sessão como narrativa
+(R5.2), que é chamada de modelo e depende do Maestro, e o servidor MCP que expõe
+as tools do núcleo ao agente (R5.6, R8.2), declarado abaixo.
 
 A revisão desta metade caiu em cima do C3 e endureceu o motor de fronteira, o
 que está registrado mais abaixo.
@@ -152,6 +149,75 @@ que está registrado mais abaixo.
   que foi montada sem modelo. Quando o C6 entrar, a narrativa vira uma reescrita
   por cima deste texto.
 
+### Adapter `claude-code` (R8.1, R8.2)
+
+- Cinco pontos de extensão registrados em `.claude/settings.json`, em **forma
+  exec**: o runtime executa o binário direto, com os argumentos em lista, sem
+  shell no meio.
+
+  Caminho de instalação com aspas, cifrão ou crase nunca chega a um parser de
+  shell. É a mesma postura do R2.14 para expressão regular.
+
+- `SessionStart` injeta as regras do harness e o bloco de retomada (R5.4).
+  `UserPromptSubmit` captura o prompt, que era a única peça do R5.1 que a trilha
+  não via sozinha. `PreToolUse` aplica a fronteira antes da escrita acontecer.
+  `PostToolUse` avisa quando a escrita derrubou o frescor de uma evidência.
+  `SessionEnd` consolida a sessão.
+
+- `psh adapter claude-code install|uninstall|status|contract|hook`.
+
+- A poda é de duas pontas e por handler (R8.6f): instalar remove o registro
+  antigo do psh, preserva hook de terceiro no mesmo evento, e conta quantos
+  apontavam para artefato ausente.
+
+- `psh doctor` reporta quantos pontos de extensão estão ativos (R8.6c). Quatro
+  de cinco é falha visível, porque significa uma responsabilidade do R8.1 que
+  simplesmente não acontece.
+
+### O contrato saiu do binário, não da documentação (R8.6b, R8.6g)
+
+Este é o modo de falha mais provável e mais silencioso do projeto, e a seção 3.2
+do PRD registra duas ocorrências na casa: 881 linhas de plugin morto no harness
+de referência, e os três mecanismos do `prostaff-hooks` que nunca responderam
+porque o campo se chamava `prompt` e o código dizia `message`.
+
+Então nenhum nome foi escrito de memória. Todos saíram do artefato instalado do
+Claude Code 2.1.238, e ficam em `contract.json`, conferidos símbolo a símbolo
+por `psh adapter claude-code contract`, que lê o binário e reprova o que não
+existe.
+
+O que a leitura do binário mostrou e a documentação não diria:
+
+- O runtime aceita **31** eventos de hook, não os oito de sempre.
+
+- `PreToolUse` aceita `permissionDecision: "defer"` além de allow, deny e ask.
+
+- A entrada de hook aceita `args`, a forma exec, que é como o adapter registra.
+
+- `SessionEnd` existe e é onde a consolidação pertence. `Stop` dispara ao fim de
+  cada turno, e consolidar ali geraria uma página por resposta do modelo.
+
+**A validação foi verificada de ponta a ponta numa sessão real**, pelo ponto de
+entrada do usuário e sem gastar turno de modelo (R8.6d). O log do próprio
+runtime registra `Successfully parsed and validated hook JSON output` e
+`Hook SessionStart provided additionalContext (1253 chars)`, e o efeito foi
+conferido em disco (R8.6e): duas entradas na trilha e a página de sessão gerada.
+
+Um caminho continua sem prova em sessão real: `PreToolUse` e `PostToolUse`
+exigem uma chamada de tool, que exige turno de modelo. Eles estão cobertos por
+teste do handler e pelo mesmo registro que o `SessionStart` usa.
+
+### Não entregue, e declarado
+
+- **Servidor MCP com as tools do núcleo** (R5.6, R8.2). O agente hoje fala com o
+  harness por linha de comando, não por tool.
+
+- **Compressor de saída** (R8.7).
+
+- **Registro de toda chamada de tool na trilha** (R4.3). Hoje entram sessão,
+  prompt e decisão de fronteira negada. Registrar toda tool call somaria um
+  `fsync` por chamada, e isso precisa de medição antes de virar padrão.
+
 ### Corrigido no motor de auditoria
 
 - **Uma escrita nova consertava a âncora de uma trilha adulterada.**
@@ -217,11 +283,14 @@ que está registrado mais abaixo.
 
 ### Qualidade
 
-- 444 testes, acima dos 326 da v0.2.0, todos passando **também com o `ai-jail`
+- 490 testes, acima dos 326 da v0.2.0, todos passando **também com o `ai-jail`
   real ligado**, sem nenhum pulado.
 
-- Cobertura de linha de 94,44% no projeto, 100% em `memory/search.ts`,
-  `memory/consolidate.ts` e `cli/args.ts`.
+- Cobertura de linha de 94,29% no projeto, 100% em `memory/search.ts`,
+  `memory/consolidate.ts`, `audit/chain.ts` e `cli/args.ts`.
+
+- A validação de contrato roda também contra um artefato controlado, para o
+  caminho ser exercitado em máquina sem o Claude Code instalado.
 
 - Cinco casos novos na suíte de integração com a jaula real: nenhuma
   configuração deixada no projeto, a terceira corrida enjaula igual à primeira,

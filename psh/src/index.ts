@@ -15,6 +15,15 @@ import { buildStatus, renderStatus } from "./cli/status.ts";
 import { renderDoctor, runDoctor } from "./cli/doctor.ts";
 import { runSpecCoverage } from "./cli/spec-coverage.ts";
 import { renderCi, runCi } from "./adapters/ci.ts";
+import { conferirContrato, renderContrato } from "./adapters/claude-code/contract.ts";
+import { handleHook } from "./adapters/claude-code/hook.ts";
+import {
+  desinstalar,
+  instalar,
+  renderInstalacao,
+  renderStatusDoAdapter,
+  statusDoAdapter,
+} from "./adapters/claude-code/install.ts";
 import { addWriteGlob, boundaryOf, checkPath, renderBoundaryList, renderExec, runExec } from "./cli/boundary.ts";
 import {
   consolidate as consolidateMemory,
@@ -52,6 +61,7 @@ const USAGE = `psh ${PSH_VERSION} - ProStaff Harness (nucleo verificavel)
                 [--pinned] [--n <N>] [--to <arquivo>] [--force] [--json]
   psh handoff   [--json] [--n <N>]
   psh adapter   ci [--json] [--gate-only] [--skip-verify]
+  psh adapter   claude-code install|uninstall|status|contract|hook [--json] [--dry-run]
   psh internal  spec-coverage --spec <arquivo> --tasks <glob> [--out <arquivo>]
 
 Valor de portao vem sempre de registro de evidencia produzido por 'psh verify'.
@@ -101,7 +111,7 @@ export async function main(argv: string[]): Promise<ExitCode> {
     case "handoff":
       return cmdHandoff(args);
     case "adapter":
-      return cmdAdapter(args);
+      return await cmdAdapter(args);
     case "internal":
       return cmdInternal(args);
     default:
@@ -523,10 +533,11 @@ function cmdHandoff(args: ParsedArgs): ExitCode {
   }
 }
 
-function cmdAdapter(args: ParsedArgs): ExitCode {
+async function cmdAdapter(args: ParsedArgs): Promise<ExitCode> {
   const sub = args.positional[0];
+  if (sub === "claude-code") return cmdAdapterClaudeCode(args);
   if (sub !== "ci") {
-    throw new PshError(`adapter desconhecido: ${sub ?? "(nenhum)"}. Disponivel na v0.1: ci`, {
+    throw new PshError(`adapter desconhecido: ${sub ?? "(nenhum)"}. Disponiveis: ci, claude-code`, {
       exitCode: EXIT.FAILURE,
     });
   }
@@ -545,6 +556,106 @@ function cmdAdapter(args: ParsedArgs): ExitCode {
   } finally {
     ctx.close();
   }
+}
+
+/**
+ * R8.2: o adapter do Claude Code.
+ *
+ * `hook` e o ponto que o runtime chama; os outros sao para o humano.
+ */
+async function cmdAdapterClaudeCode(args: ParsedArgs): Promise<ExitCode> {
+  rejectUnknownFlags(args, ["json", "root", "dry-run", "timeout"], "adapter claude-code");
+  const acao = args.positional[1] ?? "status";
+  const json = flagBool(args, "json");
+
+  if (acao === "hook") return await cmdHook(args);
+
+  if (acao === "contract") {
+    const relatorio = conferirContrato();
+    io().out(json ? `${JSON.stringify(relatorio, null, 2)}\n` : `${renderContrato(relatorio)}\n`);
+    return relatorio.ok ? EXIT.OK : EXIT.CONTRACT_INVALID;
+  }
+
+  const ctx = openProject(flagString(args, "root") ?? undefined);
+  try {
+    if (acao === "install") {
+      const r = instalar(ctx.layout, {
+        selfArgv: selfArgv(),
+        timeout_s: flagString(args, "timeout") === null ? undefined : flagInt(args, "timeout", 30),
+        dryRun: flagBool(args, "dry-run"),
+      });
+      io().out(json ? `${JSON.stringify(r, null, 2)}\n` : `${renderInstalacao(r)}\n`);
+      return EXIT.OK;
+    }
+    if (acao === "uninstall") {
+      const r = desinstalar(ctx.layout);
+      io().out(
+        json
+          ? `${JSON.stringify(r, null, 2)}\n`
+          : `${r.removidos} hook(s) do psh removido(s) de ${r.settings}; ${r.preservados} de terceiros preservado(s)\n`,
+      );
+      return EXIT.OK;
+    }
+    if (acao === "status") {
+      const s = statusDoAdapter(ctx.layout);
+      io().out(json ? `${JSON.stringify(s, null, 2)}\n` : `${renderStatusDoAdapter(s)}\n`);
+      return s.completo ? EXIT.OK : EXIT.FAILURE;
+    }
+    throw new PshError(
+      `acao desconhecida: psh adapter claude-code ${acao}. Use install, uninstall, status, contract ou hook.`,
+      { exitCode: EXIT.FAILURE },
+    );
+  } finally {
+    ctx.close();
+  }
+}
+
+/**
+ * O hook le o payload em stdin e devolve JSON em stdout.
+ *
+ * Falha aqui nunca derruba a sessao de quem esta trabalhando: o motivo vai para
+ * stderr, que o runtime mostra em modo verboso, e o codigo de saida e zero.
+ */
+async function cmdHook(args: ParsedArgs): Promise<ExitCode> {
+  const bruto = await lerStdin();
+  let payload: unknown = null;
+  try {
+    payload = bruto.trim() === "" ? null : JSON.parse(bruto);
+  } catch (cause) {
+    io().err(`psh hook: payload nao e JSON valido: ${(cause as Error).message}\n`);
+    return EXIT.OK;
+  }
+  const resultado = handleHook(payload);
+  if (resultado.output !== null) io().out(`${JSON.stringify(resultado.output)}\n`);
+  if (resultado.nota !== "") io().err(`psh hook: ${resultado.nota}\n`);
+  void args;
+  return resultado.exitCode as ExitCode;
+}
+
+/**
+ * Leitura de stdin por descritor, e nao pela API de stream.
+ *
+ * `Bun.stdin.stream()` falha com EPERM sob confinamento (o bun instalado por
+ * snap, por exemplo), e um hook que morre ao ler o proprio payload derruba a
+ * sessao de quem esta trabalhando. `readSync` no descritor 0 funciona nos dois
+ * casos e nao depende de nada alem do kernel.
+ */
+async function lerStdin(): Promise<string> {
+  const pedacos: Buffer[] = [];
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  for (;;) {
+    let lidos: number;
+    try {
+      lidos = readSync(0, buffer, 0, buffer.length, null);
+    } catch (cause) {
+      const erro = cause as NodeJS.ErrnoException;
+      if (erro.code === "EOF" || erro.code === "EAGAIN") break;
+      throw cause;
+    }
+    if (lidos <= 0) break;
+    pedacos.push(Buffer.from(buffer.subarray(0, lidos)));
+  }
+  return Buffer.concat(pedacos).toString("utf8");
 }
 
 function cmdInternal(args: ParsedArgs): ExitCode {

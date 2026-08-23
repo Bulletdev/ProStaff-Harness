@@ -6,6 +6,8 @@ import { detectSandbox } from "../evidence/sandbox.ts";
 import { probeGit } from "../evidence/workspace.ts";
 import { defaultInstallDirs, loadBoundary } from "../boundary/policy.ts";
 import { syncIndex } from "../memory/search.ts";
+import { statusDoAdapter } from "../adapters/claude-code/install.ts";
+import { acharRuntime, CONTRATO } from "../adapters/claude-code/contract.ts";
 import { PSH_TOKEN } from "../util/self.ts";
 import { PSH_VERSION } from "../version.ts";
 
@@ -41,6 +43,7 @@ export function runDoctor(ctx: ProjectContext): DoctorReport {
   checks.push(checkSecrets(ctx));
   checks.push(checkEvidenceOwnership(ctx));
   checks.push(...checkMemory(ctx));
+  checks.push(...checkAdapterClaudeCode(ctx));
 
   return {
     psh_version: PSH_VERSION,
@@ -392,6 +395,58 @@ function checkMemory(ctx: ProjectContext): Check[] {
       message: `${sync.pages_examined} pagina(s) de memoria examinada(s), ${sync.indexed} reindexada(s)`,
     });
   }
+  return out;
+}
+
+/**
+ * R8.6c: adapter parcialmente carregado e falha visivel.
+ *
+ * O modo de falha mais caro do projeto e o silencioso: 881 linhas de plugin
+ * morto no harness de referencia, e os tres mecanismos do `prostaff-hooks` que
+ * nunca responderam. Aqui o diagnostico diz quantos pontos de extensao estao
+ * registrados de verdade, e contra qual versao do runtime o contrato passou.
+ */
+function checkAdapterClaudeCode(ctx: ProjectContext): Check[] {
+  const status = statusDoAdapter(ctx.layout);
+  if (!status.existe && status.registrados === 0) {
+    // Nao instalado nao e defeito: nem todo projeto usa este runtime.
+    return [
+      {
+        id: "adapter-claude-code",
+        level: "ok",
+        message: "adapter claude-code nao instalado neste projeto",
+        detail: "Instale com 'psh adapter claude-code install'.",
+      },
+    ];
+  }
+
+  const out: Check[] = [];
+  out.push(
+    status.completo
+      ? {
+          id: "adapter-claude-code",
+          level: "ok",
+          message: `adapter claude-code: ${status.registrados}/${status.esperados} pontos de extensao ativos`,
+        }
+      : {
+          id: "adapter-claude-code",
+          level: "fail",
+          message: `adapter claude-code carregado pela metade: ${status.registrados}/${status.esperados} pontos ativos, ${status.orfaos} orfao(s)`,
+          detail: `${status.pontos.filter((p) => !p.registrado).map((p) => p.evento).join(", ") || "-"} sem registro. Rode 'psh adapter claude-code install'.`,
+        },
+  );
+
+  const runtime = acharRuntime();
+  out.push({
+    id: "adapter-claude-code-runtime",
+    level: runtime.encontrado ? "ok" : "warn",
+    message: runtime.encontrado
+      ? `runtime ${runtime.versao ?? "?"}; contrato conferido contra ${CONTRATO.verified_against.version}`
+      : "runtime claude-code nao encontrado; o contrato nao pode ser conferido aqui",
+    detail: runtime.encontrado
+      ? "Confira simbolo a simbolo com 'psh adapter claude-code contract'."
+      : runtime.detalhe,
+  });
   return out;
 }
 
