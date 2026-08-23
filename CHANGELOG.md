@@ -8,11 +8,12 @@ Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
 Motor de memória (C5), primeira metade da v0.3.
 
-Falta a outra metade para publicar: a captura automática (R5.1) e a consolidação
-por LLM (R5.2) dependem, respectivamente, dos hooks do adapter `claude-code` e do
-Maestro.
+Falta a outra metade para publicar: a captura de **prompt do usuário** (R5.1)
+depende dos hooks do adapter `claude-code`, e a reescrita da página de sessão
+como narrativa (R5.2) depende do Maestro.
 
-Enquanto isso a faixa é alimentada à mão, por `psh remember`.
+O resto da captura já existe sem adapter nenhum, porque a trilha de auditoria
+sempre registrou decisão de fase, resultado de verificador e anotação.
 
 A revisão desta metade caiu em cima do C3 e endureceu o motor de fronteira, o
 que está registrado mais abaixo.
@@ -34,8 +35,8 @@ que está registrado mais abaixo.
 - Modo degradado declarado na busca: SQLite sem FTS5 responde por varredura de
   substring, e diz que respondeu por varredura, no resultado e no `psh doctor`.
 
-- `psh remember "<fato>"` (R5.5), `psh memory list|search|get|promote|reindex` e
-  `psh handoff` (R5.4).
+- `psh remember "<fato>"` (R5.5), `psh memory
+  list|search|get|promote|consolidate|reindex` e `psh handoff` (R5.4).
 
 - `psh handoff` monta o bloco de retomada a partir do estado e da evidência em
   disco, nunca de resumo de modelo: fase, tentativa, última decisão, o que
@@ -48,6 +49,15 @@ que está registrado mais abaixo.
   repositório e deixa a página apontando para o destino (R5.7).
 
   Duas cópias sem ponteiro seriam duas verdades.
+
+- `psh memory consolidate` fecha a sessão numa página (R5.2), a partir da faixa
+  da trilha que ainda não foi consolidada.
+
+  Fases, verificadores, violações de fronteira, decisões humanas, anotações e
+  comandos, cada linha carregando o número da entrada que a originou.
+
+  A marca d'água mora em `.harness/memory/consolidation.json`, fora do índice,
+  e só avança depois de a página existir e a trilha registrar.
 
 ### Decisões que valem registro
 
@@ -114,6 +124,34 @@ que está registrado mais abaixo.
   (R7.2). Doze páginas fixadas, quatrocentos caracteres por corpo, e o que ficou
   de fora sai dito no próprio bloco, com o comando que traz o resto.
 
+- **A trilha é a captura (R5.1).**
+
+  Decisão de fase, resultado de verificador e anotação já entram nela por R4.3,
+  encadeados por hash e conferíveis por `psh audit verify`. Guardar uma segunda
+  cópia dos mesmos fatos num buffer paralelo criaria duas versões da mesma
+  sessão, e a segunda não teria como provar que é verdadeira.
+
+  O que falta é prompt do usuário, que só o adapter enxerga.
+
+- **A consolidação não resume a si mesma.**
+
+  Ela grava uma entrada `memory.write` ao terminar. Sem filtrar essa entrada,
+  rodar o comando três vezes seguidas produzia três páginas, e as duas últimas
+  só falavam da anterior.
+
+- **Trilha comprometida não vira memória.**
+
+  A consolidação verifica a cadeia antes de resumir. Assinar como memória um
+  relato que a própria cadeia não sustenta seria fabricar prova.
+
+- **A narrativa por LLM não foi improvisada.**
+
+  R5.2 pede a página reescrita como narrativa, e isso é chamada de modelo pelo
+  Maestro, que é v0.4. Em vez de chamar modelo por fora do roteador, a página
+  sai montada da trilha, com o número de cada entrada, e diz na própria página
+  que foi montada sem modelo. Quando o C6 entrar, a narrativa vira uma reescrita
+  por cima deste texto.
+
 ### Corrigido fora do escopo da memória
 
 - **Flag de traço simples nunca existiu no parser.**
@@ -162,11 +200,11 @@ que está registrado mais abaixo.
 
 ### Qualidade
 
-- 440 testes, acima dos 326 da v0.2.0, todos passando **também com o `ai-jail`
+- 444 testes, acima dos 326 da v0.2.0, todos passando **também com o `ai-jail`
   real ligado**, sem nenhum pulado.
 
-- Cobertura de linha de 94,29% no projeto, 100% em `memory/search.ts` e em
-  `cli/args.ts`.
+- Cobertura de linha de 94,44% no projeto, 100% em `memory/search.ts`,
+  `memory/consolidate.ts` e `cli/args.ts`.
 
 - Cinco casos novos na suíte de integração com a jaula real: nenhuma
   configuração deixada no projeto, a terceira corrida enjaula igual à primeira,

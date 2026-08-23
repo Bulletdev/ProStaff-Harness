@@ -7,6 +7,19 @@ import { isInside, toRel } from "../util/paths.ts";
 import { buildPage, readPage, writePage, type NewPageInput, type StoredPage } from "../memory/store.ts";
 import { searchMemory, syncIndex, type SearchResult } from "../memory/search.ts";
 import { serializePage, type PageKind } from "../memory/page.ts";
+import {
+  ATOR_DA_CONSOLIDACAO,
+  buildDigest,
+  entradasPendentes,
+  narrarDaTrilha,
+  NARRADOR,
+  readConsolidationState,
+  slugDoDigest,
+  tagsDoDigest,
+  tituloDoDigest,
+  writeConsolidationState,
+  type SessionDigest,
+} from "../memory/consolidate.ts";
 
 /** Onde `psh memory promote` deposita, quando o chamador nao diz (R5.7). */
 export const PROMOTE_DIR = join("docs", "decisoes");
@@ -191,6 +204,139 @@ function renderPromovido(stored: StoredPage, now: Date): string {
   if (p.tags.length > 0) {
     linhas.push("", `Tags: ${p.tags.join(", ")}`, "");
   }
+  return linhas.join("\n");
+}
+
+export interface ConsolidateResult {
+  /** Nulo quando nao havia nada novo na trilha. */
+  slug: string | null;
+  path: string | null;
+  from_seq: number;
+  to_seq: number;
+  entries_examined: number;
+  /** Entradas da propria consolidacao, puladas para ela nao resumir a si mesma. */
+  ignoradas: number;
+  /** Ate onde a trilha ja esta consolidada depois desta corrida. */
+  watermark: number;
+  narrador: string;
+  dry_run: boolean;
+  digest: SessionDigest;
+}
+
+/**
+ * R5.2: as capturas da sessao viram uma pagina.
+ *
+ * A faixa entre a marca d'agua e o topo da trilha vira uma pagina `session`,
+ * nao fixada, que aparece em "Memoria recente" no proximo `psh handoff`.
+ *
+ * A pagina nasce nao fixada de proposito: o que precisa sobreviver a qualquer
+ * corte e o que o humano fixou com `psh remember` (R5.5), e um resumo de sessao
+ * nao entra nessa categoria so por ser recente.
+ */
+export function consolidate(
+  ctx: ProjectContext,
+  opts: { dryRun?: boolean; now?: Date } = {},
+): ConsolidateResult {
+  const state = readConsolidationState(ctx.layout);
+  const pendentes = entradasPendentes(ctx.chain, state);
+  const digest = buildDigest(pendentes.entradas);
+
+  const base = {
+    from_seq: digest.from_seq,
+    to_seq: digest.to_seq,
+    entries_examined: digest.entries_examined,
+    ignoradas: pendentes.ignoradas,
+    watermark: pendentes.entradas.length === 0 ? pendentes.head_seq : digest.to_seq,
+    narrador: NARRADOR,
+    dry_run: opts.dryRun === true,
+    digest,
+  };
+
+  if (pendentes.entradas.length === 0) {
+    // Sem conteudo novo nao ha pagina, mas a marca d'agua avanca assim mesmo:
+    // senao as entradas de bookkeeping da propria consolidacao ficariam sendo
+    // relidas em toda corrida seguinte, para sempre.
+    if (opts.dryRun !== true && pendentes.head_seq > state.last_seq) {
+      writeConsolidationState(ctx.layout, {
+        _type: "psh-memory-consolidation",
+        version: 1,
+        last_seq: pendentes.head_seq,
+        last_slug: state.last_slug,
+        updated_at: (opts.now ?? new Date()).toISOString(),
+      });
+    }
+    return { ...base, slug: null, path: null };
+  }
+
+  const slug = slugDoDigest(digest);
+  if (opts.dryRun === true) {
+    return { ...base, slug, path: null };
+  }
+
+  const stored = writePage(
+    ctx.layout,
+    buildPage(ctx.layout, {
+      title: tituloDoDigest(digest),
+      body: narrarDaTrilha(digest),
+      kind: "session",
+      pinned: false,
+      source: `core:consolidate/${NARRADOR}`,
+      phase: ctx.state.phase,
+      tags: tagsDoDigest(digest),
+      slug,
+      now: opts.now,
+    }),
+  );
+
+  ctx.chain.append("memory.write", ATOR_DA_CONSOLIDACAO, {
+    slug: stored.page.slug,
+    kind: stored.page.kind,
+    pinned: stored.page.pinned,
+    phase: stored.page.phase,
+    content_sha256: stored.content_sha256,
+    consolidated_from: digest.from_seq,
+    consolidated_to: digest.to_seq,
+    entries_examined: digest.entries_examined,
+    narrador: NARRADOR,
+  });
+
+  // A marca d'agua so avanca depois de a pagina existir e a trilha registrar.
+  // Na ordem inversa, uma falha no meio perderia a sessao para sempre, porque a
+  // faixa ja estaria marcada como consolidada.
+  writeConsolidationState(ctx.layout, {
+    _type: "psh-memory-consolidation",
+    version: 1,
+    last_seq: digest.to_seq,
+    last_slug: stored.page.slug,
+    updated_at: (opts.now ?? new Date()).toISOString(),
+  });
+
+  syncIndex(ctx.db, ctx.layout);
+  return { ...base, slug: stored.page.slug, path: stored.path };
+}
+
+export function renderConsolidate(r: ConsolidateResult): string {
+  if (r.slug === null) {
+    return (
+      `nada a consolidar: a trilha esta consolidada ate a entrada ${r.watermark}` +
+      (r.ignoradas > 0 ? ` (${r.ignoradas} entrada(s) da propria consolidacao, que nao resume a si mesma)` : "")
+    );
+  }
+  const linhas = [
+    `${r.dry_run ? "consolidaria" : "consolidado"}: ${r.slug}`,
+    `  entradas ${r.digest.from_seq} a ${r.digest.to_seq}, ${r.entries_examined} examinada(s)`,
+    `  ${r.digest.fases.length} fase(s), ${r.digest.verificadores.length} verificacao(oes), ` +
+      `${r.digest.violacoes.length} violacao(oes), ${r.digest.decisoes.length} decisao(oes) humana(s), ` +
+      `${r.digest.anotacoes.length} anotacao(oes), ${r.digest.comandos.total} comando(s)`,
+  ];
+  const naoLidas = Object.entries(r.digest.nao_classificadas);
+  if (naoLidas.length > 0) {
+    linhas.push(`  nao resumidas: ${naoLidas.map(([t, n]) => `${t} (${n})`).join(", ")}`);
+  }
+  if (r.path !== null) linhas.push(`  ${r.path}`);
+  linhas.push(
+    `  montado a partir da trilha, sem chamada de modelo; a narrativa por LLM (R5.2) depende do Maestro`,
+  );
   return linhas.join("\n");
 }
 

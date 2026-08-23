@@ -17,10 +17,12 @@ import { runSpecCoverage } from "./cli/spec-coverage.ts";
 import { renderCi, runCi } from "./adapters/ci.ts";
 import { addWriteGlob, boundaryOf, checkPath, renderBoundaryList, renderExec, runExec } from "./cli/boundary.ts";
 import {
+  consolidate as consolidateMemory,
   get as getMemoryPage,
   list as listMemory,
   promote as promoteMemoryPage,
   remember,
+  renderConsolidate as renderMemoryConsolidate,
   renderList as renderMemoryList,
   renderPage as renderMemoryPage,
   renderSearch as renderMemorySearch,
@@ -46,7 +48,7 @@ const USAGE = `psh ${PSH_VERSION} - ProStaff Harness (nucleo verificavel)
   psh boundary  list|check <caminho>|add <agente> <glob> [--agent <id>] [--json]
   psh exec      --agent <id> [--timeout <s>] -- <comando...>
   psh remember  "<fato>" [--title <texto>] [--tags a,b] [--kind <tipo>]
-  psh memory    list|search <consulta>|get <slug>|promote <slug>|reindex
+  psh memory    list|search <consulta>|get <slug>|promote <slug>|consolidate|reindex
                 [--pinned] [--n <N>] [--to <arquivo>] [--force] [--json]
   psh handoff   [--json] [--n <N>]
   psh adapter   ci [--json] [--gate-only] [--skip-verify]
@@ -431,7 +433,7 @@ function parseTagList(raw: string | null): string[] {
 }
 
 function cmdMemory(args: ParsedArgs): ExitCode {
-  rejectUnknownFlags(args, ["json", "root", "n", "pinned", "to", "force"], "memory");
+  rejectUnknownFlags(args, ["json", "root", "n", "pinned", "to", "force", "dry-run"], "memory");
   const sub = args.positional[0] ?? "list";
   const ctx = openProject(flagString(args, "root") ?? undefined);
   try {
@@ -482,6 +484,12 @@ function cmdMemory(args: ParsedArgs): ExitCode {
       return EXIT.OK;
     }
 
+    if (sub === "consolidate") {
+      const result = consolidateMemory(ctx, { dryRun: flagBool(args, "dry-run") });
+      io().out(json ? `${JSON.stringify(result, null, 2)}\n` : `${renderMemoryConsolidate(result)}\n`);
+      return EXIT.OK;
+    }
+
     if (sub === "reindex") {
       const sync = syncMemoryIndex(ctx.db, ctx.layout);
       io().out(
@@ -493,7 +501,7 @@ function cmdMemory(args: ParsedArgs): ExitCode {
     }
 
     throw new PshError(
-      `subcomando desconhecido: psh memory ${sub}. Use list, search, get, promote ou reindex.`,
+      `subcomando desconhecido: psh memory ${sub}. Use list, search, get, promote, consolidate ou reindex.`,
       { exitCode: EXIT.FAILURE },
     );
   } finally {
