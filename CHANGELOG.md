@@ -152,6 +152,23 @@ que está registrado mais abaixo.
   que foi montada sem modelo. Quando o C6 entrar, a narrativa vira uma reescrita
   por cima deste texto.
 
+### Corrigido no motor de auditoria
+
+- **Uma escrita nova consertava a âncora de uma trilha adulterada.**
+
+  A âncora existe para pegar reescrita coordenada (R4.1), mas quem a conferia era
+  só o `verify`. Como todo `append` regrava a âncora com o topo novo, bastava
+  uma escrita qualquer depois da adulteração, `psh remember` ou o hook de fim de
+  sessão, para a cadeia voltar a fechar e o estrago sumir do relatório.
+
+  Agora o `append` recusa escrever numa trilha que não bate com a própria
+  âncora. A conferência é por contagem de linha e hash do topo, sem re-hashear a
+  cadeia inteira: remoção no meio muda a contagem, edição ou religamento mudam o
+  topo.
+
+  Achado por um teste do adapter que esperava a consolidação falhar numa trilha
+  quebrada e viu ela passar.
+
 ### Corrigido fora do escopo da memória
 
 - **Flag de traço simples nunca existiu no parser.**

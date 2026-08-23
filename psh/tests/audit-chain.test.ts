@@ -174,3 +174,45 @@ describe("trilha encadeada por hash (R4.1, R4.2)", () => {
     db.close();
   });
 });
+
+describe("nao se escreve em cima de trilha adulterada", () => {
+  test("append recusa quando o arquivo nao bate com a ancora", () => {
+    const { layout, db, chain } = chainWithAnchor();
+    seed(chain, 3);
+
+    // Some com a ultima linha: a cadeia continua internamente consistente, e e
+    // exatamente por isso que a ancora existe.
+    const linhas = lines(layout.chainPath);
+    writeFileSync(layout.chainPath, `${linhas.slice(0, -1).join("\n")}\n`);
+
+    expect(() => chain.append("audit.note", "core:psh", {})).toThrow(AuditError);
+    expect(() => chain.append("audit.note", "core:psh", {})).toThrow(/ancora/);
+    db.close();
+  });
+
+  test("sem a recusa, uma escrita qualquer apagaria o estrago do relatorio", () => {
+    const { layout, db, chain } = chainWithAnchor();
+    seed(chain, 3);
+    writeFileSync(layout.chainPath, `${lines(layout.chainPath).slice(0, -1).join("\n")}\n`);
+
+    // O `append` regrava a ancora com o topo novo. Se ele nao conferisse antes,
+    // a cadeia voltaria a fechar e `verify` diria "integra" para uma trilha de
+    // onde uma entrada foi removida.
+    expect(chain.verify().ok).toBe(false);
+    try {
+      chain.append("audit.note", "core:psh", {});
+    } catch {
+      /* esperado */
+    }
+    expect(chain.verify().ok).toBe(false);
+    db.close();
+  });
+
+  test("trilha intacta continua aceitando escrita", () => {
+    const { db, chain } = chainWithAnchor();
+    seed(chain, 2);
+    expect(() => chain.append("audit.note", "core:psh", {})).not.toThrow();
+    expect(chain.verify().ok).toBe(true);
+    db.close();
+  });
+});

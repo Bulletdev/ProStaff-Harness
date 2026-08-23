@@ -28,6 +28,8 @@ export type AuditEventType =
   | "human.approval"
   | "memory.write"
   | "memory.promote"
+  | "adapter.event"
+  | "prompt.submit"
   | "audit.note";
 
 export interface AuditEntry {
@@ -98,6 +100,7 @@ export class AuditChain {
     const release = this.#lock();
     try {
       const head = this.#head();
+      this.#assertAncoraBate(head);
       const base = {
         seq: head.seq + 1,
         ts: this.#now().toISOString(),
@@ -217,6 +220,37 @@ export class AuditChain {
       head_hash: prevHash,
       problems,
     };
+  }
+
+  /**
+   * Nao se escreve em cima de trilha que nao bate com a propria ancora.
+   *
+   * A ancora existe para pegar reescrita coordenada (R4.1), mas quem so a
+   * conferia era o `verify`. Como todo `append` regrava a ancora com o topo
+   * novo, bastava uma escrita qualquer depois da adulteracao - `psh remember`,
+   * o hook de fim de sessao, qualquer coisa - para a cadeia voltar a fechar e o
+   * estrago sumir do relatorio.
+   *
+   * A conferencia e por contagem de linha e hash do topo, sem re-hashear a
+   * cadeia inteira: remocao no meio muda a contagem, e edicao ou religamento
+   * mudam o hash do topo. E o mesmo alcance do que a ancora ja prometia, agora
+   * cobrado antes da escrita e nao so depois.
+   */
+  #assertAncoraBate(head: { seq: number; hash: string }): void {
+    const ancora = this.#anchor?.readAnchor() ?? null;
+    if (ancora === null) return;
+
+    const linhas = existsSync(this.path)
+      ? readFileSync(this.path, "utf8").split("\n").filter((l) => l.trim() !== "").length
+      : 0;
+
+    if (ancora.count === linhas && ancora.head_hash === head.hash) return;
+
+    throw new AuditError(
+      `recusando escrever numa trilha que nao bate com a ancora: ancora diz ${ancora.count} entrada(s) com topo ${ancora.head_hash}, ` +
+        `o arquivo tem ${linhas} entrada(s) com topo ${head.hash}. Rode 'psh audit verify'.`,
+      { path: this.path, anchor_count: ancora.count, file_count: linhas },
+    );
   }
 
   #head(): { seq: number; hash: string } {
