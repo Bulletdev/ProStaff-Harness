@@ -6,9 +6,132 @@ Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
-Endurecimento do motor de fronteira (C3), medido contra o `ai-jail` 1.19.2.
+Motor de memória (C5), primeira metade da v0.3.
 
-### Corrigido
+Falta a outra metade para publicar: a captura automática (R5.1) e a consolidação
+por LLM (R5.2) dependem, respectivamente, dos hooks do adapter `claude-code` e do
+Maestro.
+
+Enquanto isso a faixa é alimentada à mão, por `psh remember`.
+
+A revisão desta metade caiu em cima do C3 e endureceu o motor de fronteira, o
+que está registrado mais abaixo.
+
+### Adicionado
+
+- Página de memória em `.harness/memory/pages/<slug>.md`, markdown com cabeçalho
+  validado por JSON Schema.
+
+  O arquivo é a versão canônica; o SQLite é só índice, e pode ser apagado e
+  reconstruído sem perda. É a mesma divisão da evidência.
+
+- Índice FTS5 com frescor por hash do arquivo (R5.3).
+
+  Toda busca sincroniza o índice antes de responder: página editada fora do
+  `psh` entra na resposta seguinte, página corrompida sai do índice **com
+  aviso**, e o número de páginas examinadas vai na saída (R2.13).
+
+- Modo degradado declarado na busca: SQLite sem FTS5 responde por varredura de
+  substring, e diz que respondeu por varredura, no resultado e no `psh doctor`.
+
+- `psh remember "<fato>"` (R5.5), `psh memory list|search|get|promote|reindex` e
+  `psh handoff` (R5.4).
+
+- `psh handoff` monta o bloco de retomada a partir do estado e da evidência em
+  disco, nunca de resumo de modelo: fase, tentativa, última decisão, o que
+  reprova o portão agora, memória fixada e o próximo comando.
+
+  É o caso de uso UC3: fechar a sessão às 18h por limite de plano e reabrir
+  amanhã, possivelmente em outro runtime.
+
+- `psh memory promote <slug>` leva a página para `docs/decisoes/` no
+  repositório e deixa a página apontando para o destino (R5.7).
+
+  Duas cópias sem ponteiro seriam duas verdades.
+
+### Decisões que valem registro
+
+- **A memória entra no deny duro da fronteira.**
+
+  O bloco de handoff é injetado no início da sessão seguinte. Memória que o
+  agente escreve à mão é texto que ele injeta em si mesmo depois, sem passar por
+  nenhuma porta do núcleo. Escrita de página é por `psh remember`, mesmo com
+  `write: ["**"]` na allowlist.
+
+- **O cabeçalho não aceita o que não consegue devolver.**
+
+  `psh remember --title $'x\npinned: false'` gravava a página, reportava sucesso
+  e deixava a anotação ilegível para sempre. Tag com vírgula voltava partida em
+  duas. Quebra de linha e vírgula agora param na porta de escrita, com o campo
+  nomeado: perder a anotação que o comando existe para guardar é pior do que
+  recusar o título.
+
+- **Promover não contorna a fronteira de quem promove.**
+
+  `psh memory promote x --to src/web/app.tsx --force` deixaria um agente com
+  allowlist `src/api/**` escrever fora dela com a assinatura do núcleo. O
+  destino passa pela fronteira do agente quando há agente; o humano continua
+  sendo a autoridade que define a allowlist.
+
+- **Symlink não é página.**
+
+  Ele não era lido, mas também não era contado nem nomeado em lugar nenhum, o
+  que contraria o R2.13. Agora entra na contagem e sai nomeado na lista de
+  ignorados, e `psh memory get` recusa pelo mesmo motivo que a enumeração.
+
+- **A consulta do usuário nunca é sintaxe de FTS.**
+
+  Cada termo vira literal entre aspas com prefixo. Quem digita
+  `psh memory search "NOT ai-jail"` está procurando essas três palavras, não
+  escrevendo expressão booleana, e um termo com `*`, `(` ou `"` não derruba a
+  busca nem vira operador por acidente.
+
+- **O slug é conferido antes de virar caminho.**
+
+  Minúscula, dígito e hífen. `psh memory get ../../etc/passwd` para no alfabeto,
+  não no sistema de arquivos (R2.14).
+
+- **A página fixada vem antes da relevância na ordenação.**
+
+  R5.5 diz que ela não pode ser perdida na consolidação, e ser empurrada para
+  fora do limite da busca é uma forma de perder.
+
+- **`.harness/memory/` fica fora do repositório.**
+
+  A faixa é transitória por definição (R5.7). O que precisa sobreviver com
+  garantia sai dela por `psh memory promote` e vira arquivo versionado, que entra
+  em revisão como qualquer outro.
+
+- **Cabeçalho de página é lido em modo estrito.**
+
+  Campo desconhecido, campo repetido ou fechamento ausente derrubam a leitura.
+  Página meio lida vira contexto errado na sessão seguinte, e contexto errado não
+  avisa que está errado.
+
+- **O bloco de retomada tem teto declarado.**
+
+  Ele vai para o início da sessão seguinte, e janela útil é recurso medido
+  (R7.2). Doze páginas fixadas, quatrocentos caracteres por corpo, e o que ficou
+  de fora sai dito no próprio bloco, com o comando que traz o resto.
+
+### Corrigido fora do escopo da memória
+
+- **Flag de traço simples nunca existiu no parser.**
+
+  `psh audit log -n 5` virava dois posicionais ignorados: o comando respondia com
+  o limite padrão e sem erro nenhum. Pior, o `-n` chegava a comando que lê
+  posicional e virava nome de coisa.
+
+  Agora argumento que parece flag e não é flag falha dizendo qual é a forma
+  certa, e o uso continua possível depois de `--`. O texto de ajuda, que
+  documentava `-n`, passou a documentar `--n`.
+
+- **`--n abc` chegava ao `LIMIT` do SQLite.**
+
+  O usuário via `datatype mismatch` com pilha de exceção no lugar de "use um
+  número". Erro de uso é falha de uso, não erro inesperado.
+
+### Corrigido no motor de fronteira
 
 - **O `ai-jail` gravava a própria configuração dentro do projeto.**
 
@@ -39,10 +162,16 @@ Endurecimento do motor de fronteira (C3), medido contra o `ai-jail` 1.19.2.
 
 ### Qualidade
 
-- Quatro casos novos na suíte de integração com a jaula real: nenhuma
+- 440 testes, acima dos 326 da v0.2.0, todos passando **também com o `ai-jail`
+  real ligado**, sem nenhum pulado.
+
+- Cobertura de linha de 94,29% no projeto, 100% em `memory/search.ts` e em
+  `cli/args.ts`.
+
+- Cinco casos novos na suíte de integração com a jaula real: nenhuma
   configuração deixada no projeto, a terceira corrida enjaula igual à primeira,
-  configuração plantada na raiz não muda a fronteira, e o id do agente atravessa
-  a jaula.
+  configuração plantada na raiz não muda a fronteira, o id do agente atravessa a
+  jaula, e a memória fica fora de alcance pelo kernel.
 
 ## [0.2.0] - 2026-08-22
 

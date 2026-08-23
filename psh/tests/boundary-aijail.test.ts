@@ -179,6 +179,20 @@ describe.skipIf(!JAIL_OK)("a jaula e montada so a partir do contrato do psh", ()
     expect(ler(layout, "src/web/app.tsx")).toBe("web original\n");
   });
 
+  test("a memoria fica fora de alcance do agente, pelo kernel (R5.4)", () => {
+    const { layout, policy } = projetoForaDoTmp();
+    mkdirSync(layout.memoryPagesDir, { recursive: true });
+    writeFileSync(join(layout.memoryPagesDir, "fato.md"), "pagina original\n");
+
+    const r = comJaula(layout, policy, "echo injetado > .harness/memory/pages/fato.md");
+
+    // O bloco de handoff entra no inicio da sessao seguinte: memoria que o
+    // agente escreve e texto que ele injeta em si mesmo depois.
+    expect(r.exit_code).not.toBe(0);
+    expect(ler(layout, ".harness/memory/pages/fato.md")).toBe("pagina original\n");
+    expect(r.violations).toEqual([]);
+  });
+
   test("o id do agente atravessa a jaula, que zera o ambiente do filho", () => {
     const { layout, policy } = projetoForaDoTmp();
     // Medido contra o 1.19.2: sem `--env` explicito no argv, `PSH_AGENT` chega

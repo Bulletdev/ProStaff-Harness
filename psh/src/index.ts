@@ -6,7 +6,7 @@ import { EXIT, PshError, type ExitCode } from "./util/errors.ts";
 import { writeJsonAtomic } from "./util/json.ts";
 import { sha256 } from "./util/hash.ts";
 import { selfArgv } from "./util/self.ts";
-import { flagBool, flagString, parseArgs, rejectUnknownFlags, type ParsedArgs } from "./cli/args.ts";
+import { flagBool, flagInt, flagString, parseArgs, rejectUnknownFlags, type ParsedArgs } from "./cli/args.ts";
 import { io } from "./cli/io.ts";
 import { openProject } from "./cli/context.ts";
 import { applyPlan, buildPlan, detectStack, ensureNotNested, renderPlan } from "./cli/init.ts";
@@ -16,6 +16,19 @@ import { renderDoctor, runDoctor } from "./cli/doctor.ts";
 import { runSpecCoverage } from "./cli/spec-coverage.ts";
 import { renderCi, runCi } from "./adapters/ci.ts";
 import { addWriteGlob, boundaryOf, checkPath, renderBoundaryList, renderExec, runExec } from "./cli/boundary.ts";
+import {
+  get as getMemoryPage,
+  list as listMemory,
+  promote as promoteMemoryPage,
+  remember,
+  renderList as renderMemoryList,
+  renderPage as renderMemoryPage,
+  renderSearch as renderMemorySearch,
+  search as searchMemoryPages,
+} from "./cli/memory.ts";
+import { syncIndex as syncMemoryIndex } from "./memory/search.ts";
+import { buildHandoff, renderHandoff } from "./memory/handoff.ts";
+import type { PageKind } from "./memory/page.ts";
 import { advance } from "./workflow/advance.ts";
 import { approvalPath, assertNoForgedMetrics, type ApprovalRecord } from "./gate/evaluate.ts";
 import { DENY_ALWAYS } from "./boundary/policy.ts";
@@ -28,10 +41,14 @@ const USAGE = `psh ${PSH_VERSION} - ProStaff Harness (nucleo verificavel)
   psh verify    [<verificador>...] [--all] [--json]
   psh advance   [--force] [--reason <texto>] [--yes] [--json]
   psh approve   <assunto> [--as <nome>]
-  psh audit     verify|log [-n <N>] [--json]
+  psh audit     verify|log [--n <N>] [--json]
   psh doctor    [--json]
   psh boundary  list|check <caminho>|add <agente> <glob> [--agent <id>] [--json]
   psh exec      --agent <id> [--timeout <s>] -- <comando...>
+  psh remember  "<fato>" [--title <texto>] [--tags a,b] [--kind <tipo>]
+  psh memory    list|search <consulta>|get <slug>|promote <slug>|reindex
+                [--pinned] [--n <N>] [--to <arquivo>] [--force] [--json]
+  psh handoff   [--json] [--n <N>]
   psh adapter   ci [--json] [--gate-only] [--skip-verify]
   psh internal  spec-coverage --spec <arquivo> --tasks <glob> [--out <arquivo>]
 
@@ -75,6 +92,12 @@ export async function main(argv: string[]): Promise<ExitCode> {
       return cmdBoundary(args);
     case "exec":
       return cmdExec(args);
+    case "remember":
+      return cmdRemember(args);
+    case "memory":
+      return cmdMemory(args);
+    case "handoff":
+      return cmdHandoff(args);
     case "adapter":
       return cmdAdapter(args);
     case "internal":
@@ -253,7 +276,7 @@ function cmdAudit(args: ParsedArgs): ExitCode {
       return result.ok ? EXIT.OK : EXIT.AUDIT_BROKEN;
     }
     if (sub === "log") {
-      const limit = Number(flagString(args, "n") ?? "20");
+      const limit = flagInt(args, "n", 20);
       const entries = ctx.chain.read().slice(-limit);
       if (flagBool(args, "json")) {
         io().out(`${JSON.stringify(entries, null, 2)}\n`);
@@ -361,6 +384,132 @@ function cmdExec(args: ParsedArgs): ExitCode {
     if (outcome.result.violations.length > 0) return EXIT.BOUNDARY_VIOLATION;
     if (outcome.result.spawn_error !== null || outcome.result.signal !== null) return EXIT.FAILURE;
     return (outcome.result.exit_code ?? EXIT.FAILURE) as ExitCode;
+  } finally {
+    ctx.close();
+  }
+}
+
+function cmdRemember(args: ParsedArgs): ExitCode {
+  rejectUnknownFlags(args, ["title", "tags", "kind", "json", "root"], "remember");
+  const fato = args.positional.join(" ").trim();
+  if (fato === "") {
+    throw new PshError('uso: psh remember "<fato>"', { exitCode: EXIT.FAILURE });
+  }
+  const ctx = openProject(flagString(args, "root") ?? undefined);
+  try {
+    const kind = flagString(args, "kind") ?? "fact";
+    if (!MEMORY_KINDS.includes(kind)) {
+      throw new PshError(`tipo de memoria desconhecido: ${kind}. Use ${MEMORY_KINDS.join(", ")}.`, {
+        exitCode: EXIT.CONTRACT_INVALID,
+      });
+    }
+    const stored = remember(ctx, {
+      fact: fato,
+      title: flagString(args, "title") ?? undefined,
+      tags: parseTagList(flagString(args, "tags")),
+      kind: kind as PageKind,
+    });
+    io().out(
+      flagBool(args, "json")
+        ? `${JSON.stringify({ slug: stored.page.slug, path: stored.path, content_sha256: stored.content_sha256 }, null, 2)}\n`
+        : `anotado e fixado: ${stored.page.slug}\n  ${stored.path}\n`,
+    );
+    return EXIT.OK;
+  } finally {
+    ctx.close();
+  }
+}
+
+const MEMORY_KINDS = ["fact", "decision", "verifier", "session", "prompt", "note"];
+
+function parseTagList(raw: string | null): string[] {
+  if (raw === null) return [];
+  return raw
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t !== "");
+}
+
+function cmdMemory(args: ParsedArgs): ExitCode {
+  rejectUnknownFlags(args, ["json", "root", "n", "pinned", "to", "force"], "memory");
+  const sub = args.positional[0] ?? "list";
+  const ctx = openProject(flagString(args, "root") ?? undefined);
+  try {
+    const json = flagBool(args, "json");
+
+    if (sub === "list") {
+      const result = listMemory(ctx, {
+        pinnedOnly: flagBool(args, "pinned"),
+        limit: flagInt(args, "n", 100),
+      });
+      io().out(json ? `${JSON.stringify(result, null, 2)}\n` : `${renderMemoryList(result)}\n`);
+      return EXIT.OK;
+    }
+
+    if (sub === "search") {
+      const consulta = args.positional.slice(1).join(" ").trim();
+      if (consulta === "") throw new PshError("uso: psh memory search <consulta>", { exitCode: EXIT.FAILURE });
+      const result = searchMemoryPages(ctx, consulta, flagInt(args, "n", 10));
+      io().out(json ? `${JSON.stringify(result, null, 2)}\n` : `${renderMemorySearch(result)}\n`);
+      // Busca sem resultado nao e erro: e resposta.
+      return EXIT.OK;
+    }
+
+    if (sub === "get") {
+      const slug = args.positional[1];
+      if (slug === undefined) throw new PshError("uso: psh memory get <slug>", { exitCode: EXIT.FAILURE });
+      const stored = getMemoryPage(ctx, slug);
+      io().out(
+        json
+          ? `${JSON.stringify({ ...stored.page, path: stored.path, content_sha256: stored.content_sha256 }, null, 2)}\n`
+          : `${renderMemoryPage(stored)}\n`,
+      );
+      return EXIT.OK;
+    }
+
+    if (sub === "promote") {
+      const slug = args.positional[1];
+      if (slug === undefined) throw new PshError("uso: psh memory promote <slug> [--to <arquivo>]", { exitCode: EXIT.FAILURE });
+      const result = promoteMemoryPage(ctx, slug, {
+        to: flagString(args, "to"),
+        force: flagBool(args, "force"),
+      });
+      io().out(
+        json
+          ? `${JSON.stringify(result, null, 2)}\n`
+          : `promovida: ${result.slug}\n  ${result.from} -> ${result.to} (${result.bytes} bytes)\n  a pagina continua existindo e agora aponta para o destino.\n`,
+      );
+      return EXIT.OK;
+    }
+
+    if (sub === "reindex") {
+      const sync = syncMemoryIndex(ctx.db, ctx.layout);
+      io().out(
+        json
+          ? `${JSON.stringify(sync, null, 2)}\n`
+          : `indice: ${sync.indexed} reindexada(s), ${sync.unchanged} inalterada(s), ${sync.removed} removida(s), ${sync.pages_examined} arquivo(s) examinado(s)\n`,
+      );
+      return sync.unreadable.length > 0 ? EXIT.FAILURE : EXIT.OK;
+    }
+
+    throw new PshError(
+      `subcomando desconhecido: psh memory ${sub}. Use list, search, get, promote ou reindex.`,
+      { exitCode: EXIT.FAILURE },
+    );
+  } finally {
+    ctx.close();
+  }
+}
+
+function cmdHandoff(args: ParsedArgs): ExitCode {
+  rejectUnknownFlags(args, ["json", "root", "n"], "handoff");
+  const ctx = openProject(flagString(args, "root") ?? undefined);
+  try {
+    const handoff = buildHandoff(ctx, { limit: flagInt(args, "n", 5) });
+    io().out(
+      flagBool(args, "json") ? `${JSON.stringify(handoff, null, 2)}\n` : `${renderHandoff(handoff)}\n`,
+    );
+    return EXIT.OK;
   } finally {
     ctx.close();
   }

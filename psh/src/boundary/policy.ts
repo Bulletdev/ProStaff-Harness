@@ -42,6 +42,11 @@ export const DENY_ALWAYS: readonly string[] = [
   ".harness/audit",
   ".harness/approvals/**",
   ".harness/approvals",
+  // R5.4: o bloco de handoff entra no inicio da sessao seguinte. Memoria que o
+  // agente escreve a mao e texto que ele injeta em si mesmo depois, sem passar
+  // por nenhuma porta do nucleo. Escrita de memoria e por 'psh remember'.
+  ".harness/memory/**",
+  ".harness/memory",
   ".harness/state.json",
   ".harness/boundary.json",
   ".harness/workflow.json",

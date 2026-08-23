@@ -171,6 +171,9 @@ harness.db-shm
 evidence/
 audit/
 approvals/
+# R5.7: memoria e faixa transitoria. O que precisa sobreviver com garantia sai
+# daqui por 'psh memory promote' e vira arquivo versionado em docs/.
+memory/
 `;
 
 const BOUNDARY_SEED = {
@@ -194,7 +197,7 @@ export function applyPlan(plan: InitPlan, opts: { backup: boolean }): Layout {
   mkdirSync(layout.evidenceDir, { recursive: true });
   mkdirSync(layout.auditDir, { recursive: true });
   mkdirSync(layout.reviewsDir, { recursive: true });
-  mkdirSync(layout.memoryDir, { recursive: true });
+  mkdirSync(layout.memoryPagesDir, { recursive: true });
   mkdirSync(layout.approvalsDir, { recursive: true });
 
   if (opts.backup) {

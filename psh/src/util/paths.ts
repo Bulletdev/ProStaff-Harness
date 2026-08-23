@@ -17,6 +17,7 @@ export interface Layout {
   chainPath: string;
   reviewsDir: string;
   memoryDir: string;
+  memoryPagesDir: string;
   approvalsDir: string;
 }
 
@@ -34,6 +35,7 @@ export function layoutFor(root: string): Layout {
     chainPath: join(harness, "audit", "chain.jsonl"),
     reviewsDir: join(harness, "reviews"),
     memoryDir: join(harness, "memory"),
+    memoryPagesDir: join(harness, "memory", "pages"),
     approvalsDir: join(harness, "approvals"),
   };
 }

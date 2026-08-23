@@ -5,6 +5,7 @@ import type { ProjectContext } from "./context.ts";
 import { detectSandbox } from "../evidence/sandbox.ts";
 import { probeGit } from "../evidence/workspace.ts";
 import { defaultInstallDirs, loadBoundary } from "../boundary/policy.ts";
+import { syncIndex } from "../memory/search.ts";
 import { PSH_TOKEN } from "../util/self.ts";
 import { PSH_VERSION } from "../version.ts";
 
@@ -39,6 +40,7 @@ export function runDoctor(ctx: ProjectContext): DoctorReport {
   checks.push(checkAbsolutePaths(ctx));
   checks.push(checkSecrets(ctx));
   checks.push(checkEvidenceOwnership(ctx));
+  checks.push(...checkMemory(ctx));
 
   return {
     psh_version: PSH_VERSION,
@@ -345,6 +347,52 @@ function checkEnumeration(ctx: ProjectContext): Check {
     message: "repositorio Git com git indisponivel: frescor cai para caminhada",
     detail: `${probe.detail} Arquivo ignorado pelo .gitignore passa a entrar no hash da arvore, e evidencia valida vira obsoleta sozinha.`,
   };
+}
+
+/**
+ * C5 ativo: o diagnostico diz por qual mecanismo a busca responde e o que ficou
+ * fora do indice.
+ *
+ * Busca que responde menos porque o SQLite veio sem FTS5, ou porque uma pagina
+ * esta corrompida, nao pode parecer busca que respondeu tudo (mesma regra do
+ * modo degradado do sandbox e da fronteira).
+ */
+function checkMemory(ctx: ProjectContext): Check[] {
+  const out: Check[] = [];
+  out.push(
+    ctx.db.ftsAvailable
+      ? { id: "memory-fts", level: "ok", message: "busca de memoria por FTS5" }
+      : {
+          id: "memory-fts",
+          level: "warn",
+          message: "MODO DEGRADADO: SQLite sem FTS5, busca por substring",
+          detail: `${ctx.db.ftsUnavailableReason ?? "modulo ausente"}. Sem ranking, sem prefixo e sem tolerancia a acento.`,
+        },
+  );
+
+  const sync = syncIndex(ctx.db, ctx.layout);
+  if (sync.unreadable.length > 0) {
+    out.push({
+      id: "memory-pages",
+      level: "fail",
+      message: `${sync.unreadable.length} pagina(s) de memoria ilegivel(is), fora do indice`,
+      detail: sync.unreadable.map((p) => `${p.slug}: ${p.message}`).join("; "),
+    });
+  } else if (sync.skipped.length > 0) {
+    out.push({
+      id: "memory-pages",
+      level: "warn",
+      message: `${sync.skipped.length} arquivo(s) em .harness/memory/pages/ ignorado(s) por nome invalido`,
+      detail: sync.skipped.join(", "),
+    });
+  } else {
+    out.push({
+      id: "memory-pages",
+      level: "ok",
+      message: `${sync.pages_examined} pagina(s) de memoria examinada(s), ${sync.indexed} reindexada(s)`,
+    });
+  }
+  return out;
 }
 
 function checkEvidenceOwnership(ctx: ProjectContext): Check {

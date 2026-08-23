@@ -346,6 +346,23 @@ describe("parser de argumento", () => {
     const a = parseArgs(["--turbo"]);
     expect(() => rejectUnknownFlags(a, ["json", "root"], "verify")).toThrow(/--json/);
   });
+
+  test("traco simples e recusado em vez de virar posicional ignorado", () => {
+    // 'psh audit log -n 5' respondia com o limite padrao e sem erro: o '-n' e o
+    // '5' viravam posicionais que ninguem lia.
+    expect(() => parseArgs(["log", "-n", "5"])).toThrow(PshError);
+    expect(() => parseArgs(["log", "-n", "5"])).toThrow(/--n/);
+  });
+
+  test("numero negativo e traco sozinho continuam sendo texto", () => {
+    expect(parseArgs(["-5"]).positional).toEqual(["-5"]);
+    expect(parseArgs(["-"]).positional).toEqual(["-"]);
+  });
+
+  test("depois de -- o traco simples volta a ser texto", () => {
+    const a = parseArgs(["exec", "--", "sh", "-c", "echo oi"]);
+    expect(a.positional).toEqual(["exec", "sh", "-c", "echo oi"]);
+  });
 });
 
 describe("ordem de flag e subcomando (regressao do parser)", () => {

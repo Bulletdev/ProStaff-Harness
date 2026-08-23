@@ -26,6 +26,8 @@ export type AuditEventType =
   | "maestro.call"
   | "human.override"
   | "human.approval"
+  | "memory.write"
+  | "memory.promote"
   | "audit.note";
 
 export interface AuditEntry {
