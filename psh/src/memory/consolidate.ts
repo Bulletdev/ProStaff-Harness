@@ -1,15 +1,14 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import Ajv from "ajv";
 import consolidationSchema from "../../schemas/memory-consolidation.schema.json" with { type: "json" };
 import type { AuditChain, AuditEntry } from "../audit/chain.ts";
 import { AuditError, ContractError } from "../util/errors.ts";
 import { readJsonFile, writeJsonAtomic } from "../util/json.ts";
+import { lazyValidator } from "../util/schema.ts";
 import type { Layout } from "../util/paths.ts";
 import { formatAjvErrors } from "../workflow/load.ts";
 
-const ajv = new Ajv({ allErrors: true, strict: false });
-export const validateConsolidationSchema = ajv.compile(consolidationSchema);
+export const validateConsolidationSchema = lazyValidator(consolidationSchema);
 
 export interface ConsolidationState {
   _type: "psh-memory-consolidation";

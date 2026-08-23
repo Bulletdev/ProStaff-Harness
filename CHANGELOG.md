@@ -4,6 +4,32 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [Não lançado]
+
+### Corrigido
+
+- **O ajv compilava todo schema no import, em toda invocação.**
+
+  Medido no binário compilado, com um projeto real: `psh --version` levava
+  185 ms contra 2 ms do `bun` cru, e 181 desses 185 iam embora antes de a
+  primeira linha de lógica rodar. Compilar JSON Schema é geração de código, e
+  isso acontecia no escopo de módulo, para os sete schemas, mesmo em comando que
+  não valida nada.
+
+  Isso importa porque o hook do adapter roda **uma vez por chamada de tool**: a
+  mesma partida entrava no caminho crítico de cada escrita da sessão.
+
+  Os validadores passaram a compilar na primeira vez que são usados. A interface
+  do ajv foi mantida, incluindo `.errors`, então nenhum ponto de uso mudou.
+
+  Medido depois: `psh --version` caiu de 185 ms para 53 ms, e o hook de
+  `PreToolUse` de 200 ms para 156 ms.
+
+  O que sobra do custo está atribuído: a decisão de fronteira em si leva 1 ms, o
+  `loadBoundary` leva 38 ms compilando o schema da allowlist sob demanda, e o
+  resto é partida do binário. Baixar mais exige validador pré-compilado em tempo
+  de build, que é mudança de pipeline.
+
 ## [0.3.0] - 2026-08-23
 
 Motor de memória (C5) e adapter `claude-code` (C8), que é a v0.3 inteira.

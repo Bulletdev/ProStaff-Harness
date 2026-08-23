@@ -1,15 +1,14 @@
 import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import Ajv from "ajv";
 import boundarySchema from "../../schemas/boundary.schema.json" with { type: "json" };
 import { ContractError } from "../util/errors.ts";
 import { readJsonFile } from "../util/json.ts";
+import { lazyValidator } from "../util/schema.ts";
 import { compileGlobs, normalizeRel, type GlobSet } from "../util/globs.ts";
 import { toRel, type Layout } from "../util/paths.ts";
 import { formatAjvErrors } from "../workflow/load.ts";
 
-const ajv = new Ajv({ allErrors: true, strict: false });
-export const validateBoundarySchema = ajv.compile(boundarySchema);
+export const validateBoundarySchema = lazyValidator(boundarySchema);
 
 export interface AgentPolicy {
   description?: string;

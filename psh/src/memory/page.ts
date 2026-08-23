@@ -1,10 +1,9 @@
-import Ajv from "ajv";
 import memoryPageSchema from "../../schemas/memory-page.schema.json" with { type: "json" };
 import { ContractError } from "../util/errors.ts";
+import { lazyValidator } from "../util/schema.ts";
 import { formatAjvErrors } from "../workflow/load.ts";
 
-const ajv = new Ajv({ allErrors: true, strict: false });
-export const validateMemoryPageSchema = ajv.compile(memoryPageSchema);
+export const validateMemoryPageSchema = lazyValidator(memoryPageSchema);
 
 export type PageKind = "fact" | "decision" | "verifier" | "session" | "prompt" | "note";
 

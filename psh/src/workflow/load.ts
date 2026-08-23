@@ -1,20 +1,18 @@
-import Ajv from "ajv";
 import type { ErrorObject, ValidateFunction } from "ajv";
 import workflowSchema from "../../schemas/workflow.schema.json" with { type: "json" };
 import stateSchema from "../../schemas/state.schema.json" with { type: "json" };
 import evidenceSchema from "../../schemas/evidence.schema.json" with { type: "json" };
 import reviewSchema from "../../schemas/review.schema.json" with { type: "json" };
 import { ContractError } from "../util/errors.ts";
+import { lazyValidator } from "../util/schema.ts";
 import { readJsonFile } from "../util/json.ts";
 import { compileGlobs } from "../util/globs.ts";
 import { Workflow, type WorkflowContract } from "./types.ts";
 
-const ajv = new Ajv({ allErrors: true, strict: false });
-
-export const validateWorkflowSchema = ajv.compile(workflowSchema) as ValidateFunction;
-export const validateStateSchema = ajv.compile(stateSchema) as ValidateFunction;
-export const validateEvidenceSchema = ajv.compile(evidenceSchema) as ValidateFunction;
-export const validateReviewSchema = ajv.compile(reviewSchema) as ValidateFunction;
+export const validateWorkflowSchema = lazyValidator(workflowSchema) as ValidateFunction;
+export const validateStateSchema = lazyValidator(stateSchema) as ValidateFunction;
+export const validateEvidenceSchema = lazyValidator(evidenceSchema) as ValidateFunction;
+export const validateReviewSchema = lazyValidator(reviewSchema) as ValidateFunction;
 
 export function formatAjvErrors(errors: ErrorObject[] | null | undefined): string[] {
   return (errors ?? []).map((e) => `${e.instancePath || "/"} ${e.message ?? "invalido"}`);
