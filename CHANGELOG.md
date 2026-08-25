@@ -4,42 +4,20 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
-## [Não lançado]
-
-### Corrigido
-
-- **O ajv compilava todo schema no import, em toda invocação.**
-
-  Medido no binário compilado, com um projeto real: `psh --version` levava
-  185 ms contra 2 ms do `bun` cru, e 181 desses 185 iam embora antes de a
-  primeira linha de lógica rodar. Compilar JSON Schema é geração de código, e
-  isso acontecia no escopo de módulo, para os sete schemas, mesmo em comando que
-  não valida nada.
-
-  Isso importa porque o hook do adapter roda **uma vez por chamada de tool**: a
-  mesma partida entrava no caminho crítico de cada escrita da sessão.
-
-  Os validadores passaram a compilar na primeira vez que são usados. A interface
-  do ajv foi mantida, incluindo `.errors`, então nenhum ponto de uso mudou.
-
-  Medido depois: `psh --version` caiu de 185 ms para 53 ms, e o hook de
-  `PreToolUse` de 200 ms para 156 ms.
-
-  O que sobra do custo está atribuído: a decisão de fronteira em si leva 1 ms, o
-  `loadBoundary` leva 38 ms compilando o schema da allowlist sob demanda, e o
-  resto é partida do binário. Baixar mais exige validador pré-compilado em tempo
-  de build, que é mudança de pipeline.
-
-## [0.3.0] - 2026-08-23
+## [0.3.0] - 2026-08-25
 
 Motor de memória (C5) e adapter `claude-code` (C8), que é a v0.3 inteira.
 
-Falta para publicar apenas a reescrita da página de sessão como narrativa
-(R5.2), que é chamada de modelo e depende do Maestro, e o servidor MCP que expõe
-as tools do núcleo ao agente (R5.6, R8.2), declarado abaixo.
+Fica de fora a reescrita da página de sessão como narrativa (R5.2), que é chamada
+de modelo e depende do Maestro, e o servidor MCP que expõe as tools do núcleo ao
+agente (R5.6, R8.2), os dois declarados abaixo.
 
 A revisão desta metade caiu em cima do C3 e endureceu o motor de fronteira, o
 que está registrado mais abaixo.
+
+Entre escrever esta versão e publicá-la, ela foi ao campo pela primeira vez. O
+que voltou de lá está na seção do teste de campo, e é a parte mais importante
+deste changelog.
 
 ### Adicionado
 
@@ -307,13 +285,175 @@ teste do handler e pelo mesmo registro que o `SessionStart` usa.
   está executando vai explícita no argv, por `--env`, para que o núcleo saiba
   quem pediu a ação também dentro da jaula.
 
+### O primeiro teste de campo, e o que ele devolveu
+
+Antes de publicar, a versão foi rodada fora da suíte contra um projeto real que
+chama LLM de verdade: `promptfoo-demo-evals/multilingo-language-app`, com ai-jail
+1.20.1, verificador `evals` gastando API da Anthropic e da OpenAI, e uma sessão
+real do Claude Code sob os cinco hooks.
+
+O laudo está em `DEVDOCS/CAMPO-01-multilingo.md` e o roteiro que reproduz tudo no
+terminal está em `.verificacao/campo-multilingo/run.sh`.
+
+Tudo o que o marco promete se sustentou, e saíram dez achados. Cinco foram
+corrigidos antes desta publicação, e estão abaixo. Os outros cinco seguem
+abertos e declarados no laudo e no README: nenhum deles produz valor de portão
+errado, que foi o critério para não segurar a versão.
+
+O padrão que os dois achados graves têm em comum virou regra do projeto: **a
+infraestrutura usada para observar um workspace não pode modificar o conjunto de
+arquivos que está sendo observado**, e `sandbox(corrida atual)` não depende de
+`sandbox(corrida anterior)`.
+
+### Adicionado depois do campo
+
+- **`psh audit reanchor --reason "..."`, o caminho de volta para trilha e âncora
+  divergentes.**
+
+  A recusa de escrever numa trilha que não bate com a âncora funciona e está
+  certa, mas ela travava o projeto para qualquer operação que escreva na trilha,
+  ou seja, praticamente todas. A mensagem mandava rodar `psh audit verify`, que
+  só confirma o diagnóstico, e nenhum comando resolvia. Sobrava mexer no
+  `.harness` na mão, que é exatamente como evidência de adulteração desaparece.
+
+  Reancorar não conserta a trilha nem finge que a divergência não houve: grava na
+  própria trilha, como `audit.note`, o que a âncora dizia, o que o arquivo diz,
+  quem decidiu e por quê, e só então move a âncora para o topo real. A
+  divergência vira cicatriz permanente e legível.
+
+  O `--reason` é obrigatório, porque o valor do comando está em deixar escrito
+  por que se decidiu seguir, não em silenciar o alarme.
+
+  E ele recusa quando o defeito está **dentro** do arquivo (linha corrompida,
+  `seq` fora de ordem, elo quebrado, hash que não fecha): aí a âncora não é o
+  problema, e mover a âncora só trocaria um relatório vermelho por outro.
+
+  Achado 10 do Campo 01.
+
+### Corrigido depois do campo
+
+- **A jaula de uma corrida contaminava a corrida seguinte.**
+
+  `buildArgv` não passava `--clean` nem `--no-save-config`, então o ai-jail
+  gravava a configuração da corrida no `.ai-jail` do projeto e a lia na corrida
+  seguinte. Config de projeto do ai-jail é política monotônica: ela só aperta, e
+  a linha de comando não reabre o que ela fechou.
+
+  Consequência medida: um verificador com `network: true` rodava **sem rede**
+  logo depois de um sem rede. O `curl` saía com 6, o promptfoo contabilizava oito
+  erros de conexão e ainda assim produzia relatório com `successes: 0`, o `psh`
+  extraía esse zero e o portão decidia em cima dele. Métrica de corrida cujo
+  contrato de sandbox não foi cumprido, sem nada na saída dizendo isso.
+
+  O `psh exec` já passava as duas flags. Os dois pontos de entrada da jaula
+  discordavam entre si, e o errado era justamente o que produz valor de portão.
+
+  A invariante que isso cristaliza: `sandbox(corrida atual)` não depende de
+  `sandbox(corrida anterior)`. Coberta por teste de integração nas duas ordens,
+  com rede real.
+
+  Achado 1 do Campo 01.
+
+- **A jaula sujava a árvore observada durante a corrida.**
+
+  Mesma causa, consequência diferente: como o `.ai-jail` era escrito **durante** a
+  execução, qualquer verificador que observe `**` falhava com
+  `workspace-mutated-during-run` - inclusive o `secrets`, que vem no `common.json`
+  do próprio pacote com `watch: ["**"]`. Um verificador que roda `/bin/true`
+  reprovava.
+
+  Achado 2 do Campo 01.
+
+- **O artefato de runtime do próprio harness entrava no cálculo de frescor.**
+
+  A lista de exclusão cobria quatro caminhos enquanto o `Layout` já tinha sete
+  diretórios de runtime, então `memory/`, `approvals/`, `reviews/` e `tmp/`
+  contavam como mudança do workspace. Um `psh memory consolidate` entre a medição
+  e o portão derrubava a evidência de quem observa `**`, citando arquivo que
+  nenhum verificador escreveu.
+
+  Num projeto Git o `.harness/.gitignore` mascarava parte disso; fora do Git, ou
+  num app dentro de um repositório maior, aparecia inteiro.
+
+  A classificação agora é explícita nos dois sentidos, em `HARNESS_RUNTIME_PATHS`
+  e `HARNESS_OBSERVABLE_PATHS`, e há teste que cobra que todo caminho do `Layout`
+  esteja num dos dois. O defeito não foi a lista estar errada, foi ela ter
+  envelhecido calada enquanto o `Layout` crescia.
+
+  A exclusão passou a aparecer contada e nomeada no manifesto da evidência
+  (`harness_artifacts`): exclusão silenciosa é como um arquivo deixa de ser visto
+  sem ninguém perceber.
+
+  Resíduo do achado 2 do Campo 01.
+
+- **O relatório de CI dizia que não havia motor de fronteira.**
+
+  `boundary_engine` era o literal `"absent"`, declaração da v0.1 que ninguém
+  atualizou quando o motor entrou na v0.2. No mesmo projeto e no mesmo instante o
+  `psh status` dizia `fronteira mount` e o `psh doctor` dizia `fronteira aplicada
+  por mount do ai-jail`, enquanto o JSON de CI dizia o contrário.
+
+  O campo virou `boundary: { mode, agents, detail }` e sai da mesma função que
+  alimenta o `status`. Duas declarações paralelas do mesmo fato era o defeito, não
+  o valor errado, e há teste exigindo que os dois digam a mesma coisa.
+
+  Mudança no formato do relatório: quem consumia `boundary_engine` passa a ler
+  `boundary.mode`.
+
+  Achado 3 do Campo 01.
+
+- **Projeto em subdiretório de repositório perdia o `.gitignore`.**
+
+  `isGitRepo` era `existsSync(join(root, ".git"))`, que só acerta o projeto que é
+  a raiz do repositório. Todo app dentro de um repositório maior, que é o layout
+  de qualquer monorepo, caía para caminhada, e aí o `.gitignore` deixava de valer
+  para o hash da árvore.
+
+  Efeito medido na cobaia: entraram no hash o `.env` com chave real, o diretório
+  de relatório do promptfoo e um binário de node de 100 MB que precisou ser
+  vendorizado. O `psh doctor` declarava isso como `[ok] enumeracao por
+  caminhada`, com o detalhe "projeto nao e repositorio Git", que é falso - e o
+  `checkSecrets` do mesmo doctor usava `git ls-files` no mesmo diretório sem
+  problema nenhum.
+
+  Quem responde agora é o próprio Git, por `git rev-parse --is-inside-work-tree`.
+  O fallback pelo diretório continua existindo para um caso só, o `git` não ter
+  respondido, porque é ele que mantém o `walk-fallback` visível em vez de virar
+  caminhada silenciosa.
+
+  Achado 4 do Campo 01.
+
+### Desempenho
+
+- **O ajv compilava todo schema no import, em toda invocação.**
+
+  Medido no binário compilado, com um projeto real: `psh --version` levava
+  185 ms contra 2 ms do `bun` cru, e 181 desses 185 iam embora antes de a
+  primeira linha de lógica rodar. Compilar JSON Schema é geração de código, e
+  isso acontecia no escopo de módulo, para os sete schemas, mesmo em comando que
+  não valida nada.
+
+  Isso importa porque o hook do adapter roda **uma vez por chamada de tool**: a
+  mesma partida entrava no caminho crítico de cada escrita da sessão.
+
+  Os validadores passaram a compilar na primeira vez que são usados. A interface
+  do ajv foi mantida, incluindo `.errors`, então nenhum ponto de uso mudou.
+
+  Medido depois: `psh --version` caiu de 185 ms para 53 ms, e o hook de
+  `PreToolUse` de 200 ms para 156 ms.
+
+  O que sobra do custo está atribuído: a decisão de fronteira em si leva 1 ms, o
+  `loadBoundary` leva 38 ms compilando o schema da allowlist sob demanda, e o
+  resto é partida do binário. Baixar mais exige validador pré-compilado em tempo
+  de build, que é mudança de pipeline.
+
 ### Qualidade
 
-- 490 testes, acima dos 326 da v0.2.0, todos passando **também com o `ai-jail`
-  real ligado**, sem nenhum pulado.
+- 524 testes, acima dos 326 da v0.2.0, todos passando **também com o `ai-jail`
+  real ligado e com rede**, sem nenhum pulado.
 
-- Cobertura de linha de 94,29% no projeto, 100% em `memory/search.ts`,
-  `memory/consolidate.ts`, `audit/chain.ts` e `cli/args.ts`.
+- Cobertura de linha de 98,43% no projeto, 100% em `memory/search.ts`,
+  `memory/consolidate.ts`, `audit/chain.ts`, `cli/args.ts` e `util/paths.ts`.
 
 - A validação de contrato roda também contra um artefato controlado, para o
   caminho ser exercitado em máquina sem o Claude Code instalado.
@@ -322,6 +462,15 @@ teste do handler e pelo mesmo registro que o `SessionStart` usa.
   configuração deixada no projeto, a terceira corrida enjaula igual à primeira,
   configuração plantada na raiz não muda a fronteira, o id do agente atravessa a
   jaula, e a memória fica fora de alcance pelo kernel.
+
+- Cada correção vinda do campo foi exercitada **contra o próprio defeito** antes
+  de valer como regressão: com a correção revertida, os testes falham; com ela,
+  passam. Sem isso um teste de regressão é só um teste a mais.
+
+- Os cinco testes de jaula que provam a invariante do sandbox mediram rede de
+  verdade, nas duas ordens de execução. Eles ficavam `skip` porque o AppArmor do
+  `bun` instalado por snap nega `exec` de binário de fora do confinamento, e o
+  README do `psh` agora diz como sair disso.
 
 ## [0.2.0] - 2026-08-22
 

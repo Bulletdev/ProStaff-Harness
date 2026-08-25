@@ -25,11 +25,16 @@ coverage/
 #    ai-jail            -> github.com/akitaonrails/ai-jail (GPL-3.0)
 #    harnes-opencode    -> harness de referencia, usado no diagnostico
 #    promptfoo-demo-evals -> exemplos do promptfoo
+#    orca               -> github.com/stablyai/orca (MIT), referencia de
+#                          feature para a superficie visual (C12). Lido, nunca
+#                          vendorizado: nada dele entra no produto.
 #  A versao minima exigida do ai-jail esta no README.
 # ==========================================
 /ai-jail
 /harnes-opencode
 /promptfoo-demo-evals
+/orca
+/orca-linux.AppImage
 
 # ==========================================
 #  Artefato de execucao do harness

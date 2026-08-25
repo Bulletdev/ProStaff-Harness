@@ -31,7 +31,7 @@
 ║  Cobertura, teste, lint e segurança viram registro assinado por hash da      ║
 ║  árvore que foi verificada.                                                  ║
 ║                                                                              ║
-║  v0.3.0 · memória entre sessões · adapter Claude Code · 506 testes           ║
+║  v0.3.0 · memória entre sessões · adapter Claude Code · 524 testes           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -205,6 +205,7 @@ psh verify                # o NÚCLEO roda os verificadores do portão atual
 psh status                # fase, tentativa, portão, sandbox, trilha
 psh advance               # avalia o portão e decide a transição
 psh audit verify          # integridade da trilha encadeada
+psh audit reanchor        # decisão humana registrada quando trilha e âncora divergem
 psh doctor                # diagnóstico completo
 
 psh remember "<fato>"     # fixa o que não pode ser perdido entre sessões
@@ -266,6 +267,7 @@ O que isso impede, na prática:
 | Suíte morta por timeout ou sinal      | falha, nunca zero                                    |
 | Apagar uma linha da trilha            | `psh audit verify` acusa, saída 4                    |
 | Reescrever a trilha inteira relinkada | a âncora fora do arquivo acusa                       |
+| Escrever depois de adulterar a trilha | recusado antes da escrita, para o estrago não sumir  |
 
 ---
 
@@ -358,7 +360,7 @@ Override é ato humano com confirmação, e CI não tem humano para confirmar.
   "_type": "psh-ci-report",
   "phase": "phase.5.build",
   "sandbox_mode": "ai-jail",
-  "boundary_engine": "absent",
+  "boundary": { "mode": "mount", "agents": 2, "detail": "escrita restrita pelo kernel via ai-jail" },
   "verify": { "ran": [{ "verifier": "coverage", "status": "ok", "value": 87.4 }] },
   "gate": { "passed": true },
   "advance": { "decision": "advanced", "to": "phase.6.ux-gate" },
@@ -430,6 +432,22 @@ não ter harness nenhum.
 
   Maestro e contabilidade de token são marcos posteriores.
 
+- **O verificador não declara toolchain nem credencial.**
+
+  As flags da jaula são fixas e o `env` do verificador é mapa literal, sem
+  interpolação. Toolchain instalado sob `$HOME` some lá dentro, e passar uma
+  credencial exigiria escrever a chave em texto puro num arquivo versionado.
+
+  No primeiro teste de campo isso custou vendorizar o binário do node dentro da
+  árvore, e só funcionou porque o promptfoo lê o `.env` do diretório de trabalho
+  por conta própria.
+
+- **Cinco achados do primeiro teste de campo seguem abertos.**
+
+  Estão em `DEVDOCS/CAMPO-01-multilingo.md`, com repro e gravidade. Nenhum deles
+  produz valor de portão errado, que foi o critério para publicar a v0.3.0 com
+  eles em aberto em vez de segurar a versão.
+
 ---
 
 ## 09 · Desenvolvimento
@@ -437,7 +455,7 @@ não ter harness nenhum.
 ```sh
 cd psh
 bun run check      # typecheck + verificação estática + testes com cobertura
-bun test           # 506 testes
+bun test           # 524 testes
 bun run build      # binário único
 ```
 

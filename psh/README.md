@@ -1,7 +1,8 @@
 # psh - núcleo verificável do ProStaff Harness
 
-Marco **v0.1**: os três motores que fazem um portão valer alguma coisa, mais a
-CLI mínima e o adapter `ci`.
+Marco **v0.3**: os quatro motores que fazem um portão valer alguma coisa,
+memória que sobrevive à sessão, fronteira aplicada pelo kernel, e os adapters
+`ci` e `claude-code`.
 
 Os identificadores no formato `R1.1`, `R2.4` e afins apontam para a
 especificação interna do projeto.
@@ -38,31 +39,41 @@ fecha sozinho:
   calculado pelo núcleo por parse dos artefatos, então o núcleo precisa de um
   ponto de entrada para se reinvocar.
 
-## Fora do escopo da v0.1, e declarado como tal
+## Fora do escopo da v0.3, e declarado como tal
 
-- **C3, motor de fronteira.**
-  
-  Entra na v0.2.
-  
-  Até lá, `psh doctor` e `psh status` dizem `fronteira ausente`, e o adapter
-  `ci` devolve `boundary_engine: absent` no relatório.
-  
-  O R2.6b, que torna evidência e review inalcançáveis por agente, hoje é
-  convenção e não mecanismo.
-  
-  O código diz isso em vez de sugerir garantia.
+- **Página de sessão reescrita como narrativa** (R5.2).
 
-- **Sandbox real.**
-  
-  O contrato do R2.7 está implementado: rede desligada por padrão, opt-in
-  declarado por verificador e credencial de agente não montada.
-  
-  Mas sem `ai-jail` instalado o modo é `degraded`, declarado no `psh status`, no
-  `psh doctor` e dentro de **cada registro de evidência**.
+  O `psh memory consolidate` monta a página a partir da trilha, linha por linha,
+  cada uma carregando o número da entrada que a originou.
 
-- **C5 a C9, e o C11 além de cobertura.**
-  
+  A reescrita em prosa é chamada de modelo e depende do Maestro, que é marco
+  seguinte. Até lá a página é fiel e seca, que é a ordem certa das duas.
+
+- **Servidor MCP com as tools do núcleo** (R5.6, R8.2).
+
+  O agente fala com o harness por linha de comando, não por tool.
+
+- **Sandbox sem `ai-jail` instalado.**
+
+  O contrato do R2.7 está implementado, e com `ai-jail` presente a fronteira é
+  aplicada pelo kernel.
+
+  Sem ele o modo é `degraded`, que reverte em vez de impedir, e isso é declarado
+  no `psh status`, no `psh doctor` e dentro de **cada registro de evidência**.
+
+- **C6, C7, C9, e o C11 além de cobertura.**
+
   Marcos seguintes.
+
+- **Cinco achados do primeiro teste de campo.**
+
+  Verificador não tem como declarar toolchain nem credencial; `advance --force`
+  passa sem `--reason`; a recusa de métrica forjada usa lista fixa de nomes em vez
+  dos ids do contrato carregado; depois da fase terminal o estado fica sem nome;
+  e `psh exec` captura o stdout do comando em vez de repassá-lo.
+
+  Estão descritos em `DEVDOCS/CAMPO-01-multilingo.md`, com repro. Nenhum deles
+  produz valor de portão errado, que foi o critério para não segurar a versão.
 
 ## Instalação e uso
 
@@ -78,6 +89,7 @@ psh verify                     # o NÚCLEO roda os verificadores do portão atua
 psh status                     # fase, tentativa, portão, sandbox, trilha
 psh advance                    # avalia o portão e decide a transição
 psh audit verify               # integridade da trilha encadeada
+psh audit reanchor --reason    # caminho de volta quando trilha e âncora divergem
 psh doctor                     # diagnóstico colável em issue
 psh adapter ci --json          # verify + gate + advance, headless
 ```
@@ -214,6 +226,47 @@ comando caía no default sem avisar.
 
 Também achado na validação, também com teste de regressão.
 
+**Observar um workspace não pode modificá-lo.**
+
+A infraestrutura que mede a árvore não entra na medição, senão ela mede a si
+mesma e a evidência cai sozinha.
+
+Duas coisas saem daí. O sandbox roda com `--clean --no-save-config`, então o
+`psh` não lê nem grava o `.ai-jail` do projeto e uma corrida não tem como
+envenenar a seguinte. E o que o núcleo escreve dentro de `.harness/` enquanto
+opera fica fora do cálculo de frescor, listado em `HARNESS_RUNTIME_PATHS`.
+
+A lista é nomeada, não é "tudo dentro de `.harness/`": contrato e documento de
+fase moram no mesmo diretório e continuam observáveis, porque escondê-los abriria
+a classe dos arquivos invisíveis ao observador.
+
+E a exclusão aparece contada e nomeada no manifesto da evidência, porque decisão
+de medição que não fica no registro não pode ser auditada depois.
+
+Os dois casos foram achados no Campo 01, e a invariante é
+`sandbox(corrida atual)` não depender de `sandbox(corrida anterior)`.
+
+**Trilha divergente tem caminho de volta declarado.**
+
+A recusa de escrever em trilha que não bate com a âncora está certa, mas travar
+sem saída deixava uma alternativa real só, que era apagar o `.harness` na mão -
+exatamente como evidência de adulteração desaparece.
+
+`psh audit reanchor --reason "..."` grava na própria trilha o que a âncora dizia,
+o que o arquivo diz, quem decidiu e por quê, e só então move a âncora.
+
+Ele recusa quando o defeito está dentro do arquivo, porque aí a âncora não é o
+problema e mover a âncora só trocaria um relatório vermelho por outro.
+
+**Um fato, uma fonte.**
+
+O relatório de CI dizia `boundary_engine: "absent"` enquanto o `psh status` dizia
+`fronteira mount`, no mesmo projeto e no mesmo instante.
+
+O defeito não foi o valor errado, foi haver duas declarações paralelas do mesmo
+fato. O adapter passou a chamar a mesma função que alimenta o `status`, e há
+teste que exige que os dois digam a mesma coisa palavra por palavra.
+
 **Caminho nunca vira expressão regular (R2.14).**
 
 Casamento por `Bun.Glob` com o caminho sempre do lado da entrada, comparação de
@@ -228,7 +281,7 @@ coisa que não seja literal constante.
 <projeto>/.harness/
   workflow.json      contrato de fases, portões e verificadores (humano)
   state.json         snapshot da fase (NÚCLEO, apenas)
-  boundary.json      allowlist (humano; motor entra na v0.2)
+  boundary.json      allowlist por agente (humano; aplicada pelo motor do C3)
   harness.db         SQLite: eventos, índice de evidência, contadores, âncora
   evidence/<fase>/<tentativa>/<verificador>.json      (NÚCLEO, apenas)
                                         .manifest.json  arquivo -> hash
@@ -236,10 +289,20 @@ coisa que não seja literal constante.
   reviews/*.review.json    score de LLM amarrado ao hash do artefato
   approvals/*.json         aprovação humana amarrada ao conteúdo
   audit/chain.jsonl        trilha encadeada por hash
+  memory/pages/*.md        página de memória (canônica; o SQLite é só índice)
+  memory/consolidation.json  marca d'água da consolidação de sessão
+  tmp/                     rascunho de execução, por exemplo o snapshot da fronteira
 ```
 
-`harness.db`, `evidence/`, `audit/` e `approvals/` entram no `.gitignore` gerado
-pelo `psh init`.
+`harness.db`, `evidence/`, `audit/`, `approvals/` e `memory/` entram no
+`.gitignore` gerado pelo `psh init`.
+
+O que dentro de `.harness/` é escrito pelo núcleo enquanto ele opera está
+declarado em `HARNESS_RUNTIME_PATHS`, e fica fora do cálculo de frescor.
+
+O contrato e os documentos de fase moram no mesmo diretório e continuam
+observáveis, listados em `HARNESS_OBSERVABLE_PATHS`. Há teste cobrando que todo
+caminho do `Layout` esteja numa das duas listas.
 
 ## Qualidade
 
@@ -253,12 +316,15 @@ Cobertura de linha nos módulos que o R11.1 exige em 85%:
 | Módulo                  | Linhas |
 |-------------------------|--------|
 | `audit/chain.ts`        | 100%   |
-| `evidence/sandbox.ts`   | 100%   |
+| `evidence/workspace.ts` | 95%    |
+| `gate/evaluate.ts`      | 93%    |
+| `evidence/sandbox.ts`   | 93%    |
 | `evidence/runner.ts`    | 92%    |
-| `evidence/workspace.ts` | 89%    |
 | `evidence/store.ts`     | 88%    |
 | `evidence/extract/`     | 85%    |
-| `gate/evaluate.ts`      | 93%    |
+
+O projeto inteiro está em 98% de linha, com a suíte rodando com `ai-jail` real e
+rede.
 
 Nos demais módulos o piso é 70%, e o menor é `util/self.ts` com 71%.
 
@@ -290,12 +356,12 @@ Casos da suíte adversarial do R11.2 já cobertos:
 - **15** - instalação em diretório com `+`, `[` e espaço no nome
 - **16** - varredura sem nenhum candidato
 
-Os casos 1, 2, 5, 6 e 9 dependem do motor de fronteira e entram na v0.2.
+Os casos 1, 2, 5, 6 e 9 dependem do motor de fronteira, entregue na v0.2.
 
 ## Rodando a suíte completa
 
-Sete testes de integração exercitam a fronteira contra o `ai-jail` de verdade, e
-três dependem de Git.
+Dezessete testes de integração exercitam a fronteira e a jaula contra o `ai-jail`
+de verdade, três deles medindo rede real, e alguns dependem de Git.
 
 Quando as ferramentas não estão presentes eles são declarados `skip`, porque
 passar sem exercitar seria pior do que não existir.
@@ -334,7 +400,7 @@ isso no `psh status` e no `psh doctor`.
 
 ## Nota de ambiente
 
-Um `bun` instalado por snap roda confinado, e o confinamento aparece de três
+Um `bun` instalado por snap roda confinado, e o confinamento aparece de quatro
 formas.
 
 Não enxerga o `git` do sistema: o frescor cai para caminhada e o `.gitignore`
@@ -342,10 +408,26 @@ deixa de ser respeitado.
 
 Tem `/tmp` privado: um projeto ali fica invisível para processos fora do snap.
 
-E o `ai-jail` lançado por ele não alcança o `bwrap`, então o isolamento não
-sobe.
+Tem `HOME` redirecionado para `~/snap/bun-js/<rev>`, então `homedir()` não é o
+home real.
 
-O `psh doctor` reprova com `workspace-enum` no primeiro caso, e os testes de
-integração se declaram `skip` no terceiro.
+E o AppArmor do snap nega `exec` de binário de fora do confinamento: um
+`spawn` do `ai-jail` volta `EACCES` mesmo com o caminho absoluto certo e o bit
+de execução no lugar.
+
+O `psh doctor` reprova com `workspace-enum` no primeiro caso, e é o quarto que
+deixa os testes de `boundary-aijail.test.ts` em `skip` permanente, incluindo os
+que provam que a jaula de uma corrida não contamina a seguinte.
+
+Para exercitá-los é preciso um `bun` fora do snap:
+
+```sh
+curl -fsSL -o bun.zip https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.zip
+unzip -q bun.zip && mv bun-linux-x64/bun ~/.cache/psh-bin/bun
+
+PSH_AI_JAIL_BIN=$PWD/ai-jail ~/.cache/psh-bin/bun test
+```
+
+Com ele a suíte roda inteira, sem nenhum `skip`.
 
 O binário compilado por `bun run build` não tem nenhuma dessas limitações.
