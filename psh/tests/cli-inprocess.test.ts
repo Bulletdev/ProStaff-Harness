@@ -262,6 +262,42 @@ describe("approve e audit pela CLI", () => {
     expect(r.code).toBe(EXIT.FAILURE);
     expect(r.err).toContain("subcomando desconhecido");
   });
+
+  /**
+   * Campo 01, achado 10. Trunca a trilha com o banco intacto, que e o unico
+   * estado onde a divergencia foi reproduzivel, e cobra o ciclo inteiro pela
+   * CLI: travado, diagnosticado, reancorado com motivo, destravado.
+   */
+  test("reanchor devolve um projeto travado por divergencia de ancora", async () => {
+    const layout = projeto();
+    await cli(["verify", "--root", layout.root]);
+    await cli(["advance", "--root", layout.root]);
+
+    const linhas = readFileSync(layout.chainPath, "utf8").split("\n").filter((l) => l.trim() !== "");
+    expect(linhas.length).toBeGreaterThan(1);
+    writeFileSync(layout.chainPath, `${linhas.slice(0, 1).join("\n")}\n`);
+
+    const travado = await cli(["approve", "brief.md", "--root", layout.root]);
+    expect(travado.code).not.toBe(EXIT.OK);
+    expect(travado.err).toContain("reanchor");
+
+    const semMotivo = await cli(["audit", "reanchor", "--root", layout.root]);
+    expect(semMotivo.code).toBe(EXIT.FAILURE);
+    expect(semMotivo.err).toContain("--reason");
+
+    const r = await cli([
+      "audit", "reanchor", "--reason", "trilha truncada na restauracao do backup de ontem",
+      "--as", "michael", "--root", layout.root,
+    ]);
+    expect(r.code).toBe(EXIT.OK);
+    expect(r.out).toContain("michael");
+    expect(r.out).toContain("trilha truncada");
+
+    // Destravou, e o motivo ficou na trilha em vez de na memoria de quem rodou.
+    const depois = await cli(["approve", "brief.md", "--root", layout.root]);
+    expect(depois.code).toBe(EXIT.OK);
+    expect(readFileSync(layout.chainPath, "utf8")).toContain("trilha truncada na restauracao");
+  });
 });
 
 describe("doctor e internal pela CLI", () => {

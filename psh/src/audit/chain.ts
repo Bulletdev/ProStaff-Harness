@@ -101,43 +101,117 @@ export class AuditChain {
     try {
       const head = this.#head();
       this.#assertAncoraBate(head);
-      const base = {
-        seq: head.seq + 1,
-        ts: this.#now().toISOString(),
-        type,
-        actor,
-        payload,
-        prev_hash: head.hash,
-      };
-      const entry: AuditEntry = { ...base, hash: entryHash(base) };
-
-      let fd: number;
-      try {
-        mkdirSync(dirname(this.path), { recursive: true });
-        fd = openSync(this.path, "a", 0o644);
-      } catch (cause) {
-        throw new AuditError(
-          `nao foi possivel abrir a trilha em ${this.path}: ${(cause as Error).message}`,
-          { path: this.path },
-        );
-      }
-      try {
-        writeSync(fd, `${canonicalJson(entry)}\n`);
-        fsyncSync(fd);
-      } catch (cause) {
-        throw new AuditError(`falha ao gravar na trilha: ${(cause as Error).message}`, {
-          path: this.path,
-          seq: entry.seq,
-        });
-      } finally {
-        closeSync(fd);
-      }
-
-      this.#anchor?.writeAnchor({ count: entry.seq, head_hash: entry.hash });
-      return entry;
+      return this.#grava(type, actor, payload, head);
     } finally {
       release();
     }
+  }
+
+  /**
+   * O caminho de volta para trilha e ancora divergentes.
+   *
+   * A protecao de `#assertAncoraBate` esta certa em travar o projeto: uma trilha
+   * que nao bate com a propria ancora perdeu a garantia que ela existe para dar.
+   * Mas travar sem saida deixava uma unica alternativa real, que era apagar o
+   * `.harness` na mao, e apagar no susto e exatamente como a evidencia de
+   * adulteracao desaparece.
+   *
+   * Reancorar nao conserta nada nem finge que o estranho nao aconteceu: ele
+   * grava na propria trilha o que a ancora dizia, o que o arquivo diz, quem
+   * decidiu e por que, e so entao passa a ancora a apontar para o topo real. A
+   * divergencia vira cicatriz permanente e legivel, em vez de virar diretorio
+   * apagado.
+   *
+   * Recusa quando o problema esta DENTRO do arquivo (linha corrompida, seq fora
+   * de ordem, elo quebrado, hash que nao fecha): ai a ancora nao e o defeito, e
+   * mover a ancora so trocaria um relatorio vermelho por outro. Prometer conserto
+   * nesse caso seria pior que nao ter o comando.
+   */
+  reanchor(reason: string, actor: string): { entry: AuditEntry; anchorBefore: AuditAnchor | null } {
+    if (reason.trim() === "") {
+      throw new AuditError("reancorar exige um motivo escrito: a decisao fica na trilha, nao na memoria de quem rodou", {
+        path: this.path,
+      });
+    }
+    if (this.#anchor === null) {
+      throw new AuditError("este projeto nao tem ancora externa, entao nao ha o que reancorar", {
+        path: this.path,
+      });
+    }
+
+    const release = this.#lock();
+    try {
+      const interno = this.verify().problems.filter((p) => !p.kind.startsWith("anchor-"));
+      if (interno.length > 0) {
+        throw new AuditError(
+          `a trilha tem ${interno.length} problema(s) dentro do proprio arquivo, e reancorar nao conserta isso: ` +
+            `${interno.map((p) => `${p.kind}${"line" in p ? ` na linha ${p.line}` : ""}`).join(", ")}. ` +
+            "A ancora nao e o defeito aqui. Rode 'psh audit verify' e trate a cadeia antes.",
+          { path: this.path, problems: interno.length },
+        );
+      }
+
+      const anchorBefore = this.#anchor.readAnchor();
+      const head = this.#head();
+      const linhas = this.#contarLinhas();
+      const entry = this.#grava(
+        "audit.note",
+        actor,
+        {
+          note: "reancoragem da trilha por decisao humana",
+          reason,
+          anchor_before: anchorBefore === null ? null : { count: anchorBefore.count, head_hash: anchorBefore.head_hash },
+          file_at_reanchor: { count: linhas, head_hash: head.hash },
+        },
+        head,
+      );
+      return { entry, anchorBefore };
+    } finally {
+      release();
+    }
+  }
+
+  /** Grava e reancora. Fora do `append` porque `reanchor` entra sem a assercao. */
+  #grava(
+    type: AuditEventType,
+    actor: string,
+    payload: Record<string, unknown>,
+    head: { seq: number; hash: string },
+  ): AuditEntry {
+    const base = {
+      seq: head.seq + 1,
+      ts: this.#now().toISOString(),
+      type,
+      actor,
+      payload,
+      prev_hash: head.hash,
+    };
+    const entry: AuditEntry = { ...base, hash: entryHash(base) };
+
+    let fd: number;
+    try {
+      mkdirSync(dirname(this.path), { recursive: true });
+      fd = openSync(this.path, "a", 0o644);
+    } catch (cause) {
+      throw new AuditError(
+        `nao foi possivel abrir a trilha em ${this.path}: ${(cause as Error).message}`,
+        { path: this.path },
+      );
+    }
+    try {
+      writeSync(fd, `${canonicalJson(entry)}\n`);
+      fsyncSync(fd);
+    } catch (cause) {
+      throw new AuditError(`falha ao gravar na trilha: ${(cause as Error).message}`, {
+        path: this.path,
+        seq: entry.seq,
+      });
+    } finally {
+      closeSync(fd);
+    }
+
+    this.#anchor?.writeAnchor({ count: entry.seq, head_hash: entry.hash });
+    return entry;
   }
 
   read(): AuditEntry[] {
@@ -240,17 +314,24 @@ export class AuditChain {
     const ancora = this.#anchor?.readAnchor() ?? null;
     if (ancora === null) return;
 
-    const linhas = existsSync(this.path)
-      ? readFileSync(this.path, "utf8").split("\n").filter((l) => l.trim() !== "").length
-      : 0;
+    const linhas = this.#contarLinhas();
 
     if (ancora.count === linhas && ancora.head_hash === head.hash) return;
 
     throw new AuditError(
       `recusando escrever numa trilha que nao bate com a ancora: ancora diz ${ancora.count} entrada(s) com topo ${ancora.head_hash}, ` +
-        `o arquivo tem ${linhas} entrada(s) com topo ${head.hash}. Rode 'psh audit verify'.`,
+        `o arquivo tem ${linhas} entrada(s) com topo ${head.hash}. ` +
+        "Rode 'psh audit verify' para o diagnostico, e 'psh audit reanchor --reason \"...\"' " +
+        "para registrar a decisao de seguir a partir do arquivo atual.",
       { path: this.path, anchor_count: ancora.count, file_count: linhas },
     );
+  }
+
+  #contarLinhas(): number {
+    if (!existsSync(this.path)) return 0;
+    return readFileSync(this.path, "utf8")
+      .split("\n")
+      .filter((l) => l.trim() !== "").length;
   }
 
   #head(): { seq: number; hash: string } {

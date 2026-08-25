@@ -53,6 +53,7 @@ const USAGE = `psh ${PSH_VERSION} - ProStaff Harness (nucleo verificavel)
   psh advance   [--force] [--reason <texto>] [--yes] [--json]
   psh approve   <assunto> [--as <nome>]
   psh audit     verify|log [--n <N>] [--json]
+  psh audit     reanchor --reason <motivo> [--as <quem>] [--json]
   psh doctor    [--json]
   psh boundary  list|check <caminho>|add <agente> <glob> [--agent <id>] [--json]
   psh exec      --agent <id> [--timeout <s>] -- <comando...>
@@ -268,7 +269,7 @@ function cmdApprove(args: ParsedArgs): ExitCode {
 }
 
 function cmdAudit(args: ParsedArgs): ExitCode {
-  rejectUnknownFlags(args, ["json", "n", "root"], "audit");
+  rejectUnknownFlags(args, ["json", "n", "root", "reason", "as"], "audit");
   const sub = args.positional[0] ?? "verify";
   const ctx = openProject(flagString(args, "root") ?? undefined);
   try {
@@ -299,7 +300,36 @@ function cmdAudit(args: ParsedArgs): ExitCode {
       }
       return EXIT.OK;
     }
-    throw new PshError(`subcomando desconhecido: psh audit ${sub}. Use 'verify' ou 'log'.`, {
+    if (sub === "reanchor") {
+      // O motivo e obrigatorio de propria natureza: reancorar e admitir que a
+      // trilha e a ancora discordaram, e o valor do comando esta em deixar
+      // escrito por que se decidiu seguir a partir do arquivo, e nao em
+      // silenciar o alarme.
+      const reason = flagString(args, "reason");
+      if (reason === null || reason.trim() === "") {
+        throw new PshError(
+          "uso: psh audit reanchor --reason \"por que a trilha e a ancora divergiram e por que seguir a partir do arquivo atual\"",
+          { exitCode: EXIT.FAILURE },
+        );
+      }
+      const antes = ctx.chain.verify();
+      const quem = flagString(args, "as") ?? process.env.USER ?? "human";
+      const { entry, anchorBefore } = ctx.chain.reanchor(reason, `human:${quem}`);
+      const depois = ctx.chain.verify();
+      if (flagBool(args, "json")) {
+        io().out(`${JSON.stringify({ reanchored: true, reason, by: quem, entry, before: antes, after: depois }, null, 2)}\n`);
+      } else {
+        io().out(
+          `reancorada por ${quem}: a ancora dizia ${anchorBefore?.count ?? 0} entrada(s) com topo ${anchorBefore?.head_hash ?? "-"}, ` +
+            `e o arquivo tinha ${antes.entries}.\n` +
+            `A divergencia ficou registrada na trilha como entrada ${entry.seq} (audit.note), com o motivo.\n` +
+            `motivo: ${reason}\n` +
+            `${depois.ok ? "cadeia integra" : "CADEIA AINDA COMPROMETIDA"}: ${depois.entries} entradas, topo ${depois.head_hash}\n`,
+        );
+      }
+      return depois.ok ? EXIT.OK : EXIT.AUDIT_BROKEN;
+    }
+    throw new PshError(`subcomando desconhecido: psh audit ${sub}. Use 'verify', 'log' ou 'reanchor'.`, {
       exitCode: EXIT.FAILURE,
     });
   } finally {
