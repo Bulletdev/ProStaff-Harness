@@ -66,15 +66,32 @@ describe("adapter ci: headless, sem interacao, sem regra de negocio propria", ()
       gate: { passed: boolean };
       advance: { decision: string; to: string };
       audit_ok: boolean;
-      boundary_engine: string;
+      boundary: { mode: string; agents: number; detail: string };
     };
     expect(report._type).toBe("psh-ci-report");
     expect(report.verify.ran[0]).toMatchObject({ verifier: "coverage" });
     expect(report.gate.passed).toBe(true);
     expect(report.advance).toMatchObject({ decision: "advanced", to: "fim" });
     expect(report.audit_ok).toBe(true);
-    // O adapter declara que o motor de fronteira nao existe, em vez de calar.
-    expect(report.boundary_engine).toBe("absent");
+    expect(report.boundary.mode).not.toBe("absent");
+    expect(report.boundary.detail.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Campo 01, achado 3. O campo era o literal `"absent"` desde a v0.1, entao no
+   * mesmo instante o `status` dizia `fronteira mount` e o CI dizia que motor de
+   * fronteira nao havia. Quem consumia o JSON concluia o contrario do que estava
+   * acontecendo, que e a pior falha possivel num contrato de maquina.
+   */
+  test("o que o CI diz da fronteira e o que o status diz, palavra por palavra", () => {
+    const layout = projeto(LCOV_87);
+    const ci = JSON.parse(psh(layout, ["adapter", "ci", "--gate-only", "--json"]).out) as {
+      boundary: { mode: string; agents: number; detail: string };
+    };
+    const status = JSON.parse(psh(layout, ["status", "--json"]).out) as {
+      boundary: { mode: string; agents: number; detail: string };
+    };
+    expect(ci.boundary).toEqual(status.boundary);
   });
 
   test("portao reprovado sai com codigo de portao e nao avanca de fase", () => {
