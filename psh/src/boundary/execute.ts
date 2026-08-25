@@ -136,7 +136,7 @@ interface Snapshot {
 }
 
 function tirarSnapshot(opts: ExecOptions, budget: number): Snapshot {
-  const dir = join(opts.layout.harness, "tmp", `boundary-${process.pid}-${opts.agentId}`);
+  const dir = join(opts.layout.tmpDir, `boundary-${process.pid}-${opts.agentId}`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
 

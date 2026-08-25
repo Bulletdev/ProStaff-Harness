@@ -5,6 +5,7 @@ import { toRel } from "../util/paths.ts";
 import { readJsonFile, writeJsonAtomic } from "../util/json.ts";
 import { ContractError } from "../util/errors.ts";
 import { formatAjvErrors, validateEvidenceSchema } from "../workflow/load.ts";
+import type { WorkspaceManifest } from "./workspace.ts";
 
 export const ADHOC_PHASE = "_adhoc";
 
@@ -80,7 +81,7 @@ export function writeEvidence(
   layout: Layout,
   slot: EvidenceSlot,
   record: EvidenceRecord,
-  extras: { stdout: string; stderr: string; manifestFiles: Record<string, string> | null },
+  extras: { stdout: string; stderr: string; workspace: WorkspaceManifest | null },
 ): EvidenceRecord {
   if (!validateEvidenceSchema(record as unknown)) {
     throw new ContractError(
@@ -91,13 +92,20 @@ export function writeEvidence(
   mkdirSync(slot.dir, { recursive: true });
   writeFileSync(slot.stdoutPath, extras.stdout, { mode: 0o644 });
   writeFileSync(slot.stderrPath, extras.stderr, { mode: 0o644 });
-  if (extras.manifestFiles !== null) {
+  if (extras.workspace !== null) {
+    // `harness_artifacts` fica gravado junto dos arquivos medidos porque a
+    // exclusao do artefato do proprio harness e decisao de medicao, e decisao de
+    // medicao que nao aparece no registro nao pode ser auditada depois.
     writeJsonAtomic(slot.manifestPath, {
       _type: "psh-workspace-manifest",
       version: 1,
       verifier: record.verifier,
       workspace_hash: record.workspace_hash,
-      files: extras.manifestFiles,
+      harness_artifacts: {
+        skipped: extras.workspace.harness_artifacts_skipped,
+        excluded: extras.workspace.harness_artifacts_excluded,
+      },
+      files: extras.workspace.files,
     });
   }
   writeJsonAtomic(slot.recordPath, record);
@@ -125,6 +133,8 @@ export interface StoredManifest {
   version: 1;
   verifier: string;
   workspace_hash: string | null;
+  /** Ausente nos manifestos gravados antes da v0.3.1. */
+  harness_artifacts?: { skipped: number; excluded: readonly string[] };
   files: Record<string, string>;
 }
 

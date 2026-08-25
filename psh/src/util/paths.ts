@@ -5,6 +5,47 @@ import { normalizeRel } from "./globs.ts";
 
 export const HARNESS_DIR = ".harness";
 
+/**
+ * O que dentro de `.harness/` e escrito pelo proprio nucleo enquanto ele opera.
+ *
+ * Nada disso entra no calculo de frescor, porque a infraestrutura que observa um
+ * workspace nao pode ser contada como quem o modificou. Sem essa regra um
+ * verificador que observa `**` reprova sozinho: basta um `psh memory
+ * consolidate` entre a medicao e o portao para a evidencia cair citando um
+ * arquivo que nenhum verificador escreveu.
+ *
+ * A lista e nomeada em vez de ser "tudo dentro de `.harness/`" porque contrato e
+ * documento de fase moram no mesmo diretorio e precisam continuar observaveis.
+ * Esconder um deles abriria a classe dos arquivos invisiveis ao observador, que
+ * e exatamente o que um harness que alega frescor nao pode ter.
+ */
+export const HARNESS_RUNTIME_PATHS: readonly string[] = [
+  `${HARNESS_DIR}/evidence/`,
+  `${HARNESS_DIR}/audit/`,
+  `${HARNESS_DIR}/memory/`,
+  `${HARNESS_DIR}/approvals/`,
+  `${HARNESS_DIR}/reviews/`,
+  `${HARNESS_DIR}/tmp/`,
+  `${HARNESS_DIR}/harness.db`,
+  `${HARNESS_DIR}/state.json`,
+];
+
+/**
+ * O outro lado da mesma classificacao: o que mora em `.harness/` e continua
+ * valendo como material de portao, entao e observavel.
+ *
+ * As duas listas juntas precisam cobrir o `Layout` inteiro, e `paths-and-globs`
+ * cobra isso. E o teste que impede a lista de runtime de envelhecer calada, que
+ * foi como `memory/`, `approvals/` e `reviews/` ficaram de fora dela.
+ */
+export const HARNESS_OBSERVABLE_PATHS: readonly string[] = [
+  `${HARNESS_DIR}/workflow.json`,
+  `${HARNESS_DIR}/boundary.json`,
+  `${HARNESS_DIR}/SPEC.md`,
+  `${HARNESS_DIR}/brief.md`,
+  `${HARNESS_DIR}/sprints/`,
+];
+
 export interface Layout {
   root: string;
   harness: string;
@@ -19,6 +60,8 @@ export interface Layout {
   memoryDir: string;
   memoryPagesDir: string;
   approvalsDir: string;
+  /** Rascunho de execucao, por exemplo o snapshot que a fronteira usa. */
+  tmpDir: string;
 }
 
 export function layoutFor(root: string): Layout {
@@ -37,6 +80,7 @@ export function layoutFor(root: string): Layout {
     memoryDir: join(harness, "memory"),
     memoryPagesDir: join(harness, "memory", "pages"),
     approvalsDir: join(harness, "approvals"),
+    tmpDir: join(harness, "tmp"),
   };
 }
 

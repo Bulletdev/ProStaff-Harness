@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { delimiter, isAbsolute, join } from "node:path";
 import type { ProjectContext } from "./context.ts";
 import { detectSandbox } from "../evidence/sandbox.ts";
-import { probeGit } from "../evidence/workspace.ts";
+import { isGitRepo, probeGit } from "../evidence/workspace.ts";
 import { defaultInstallDirs, loadBoundary } from "../boundary/policy.ts";
 import { syncIndex } from "../memory/search.ts";
 import { statusDoAdapter } from "../adapters/claude-code/install.ts";
@@ -341,7 +341,9 @@ function checkEnumeration(ctx: ProjectContext): Check {
   if (probe.available) {
     return { id: "workspace-enum", level: "ok", message: "enumeracao por git", detail: probe.detail };
   }
-  if (!existsSync(join(ctx.layout.root, ".git"))) {
+  // Mesma pergunta que a enumeracao faz, feita ao git e nao ao diretorio: um app
+  // dentro de repositorio maior nao tem `.git/` proprio e continua sob Git.
+  if (!isGitRepo(ctx.layout.root)) {
     return { id: "workspace-enum", level: "ok", message: "enumeracao por caminhada", detail: probe.detail };
   }
   return {
