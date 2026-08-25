@@ -105,7 +105,15 @@ describe("montagem do comando (R3.4: defaults seguros preservados)", () => {
     const status: SandboxStatus = { mode: "ai-jail", detail: "t", jail_bin: "/bin/ai-jail", jail_version: "1" };
     const { argv, wrapped } = buildArgv(req, status);
     expect(wrapped).toBe(true);
-    expect(argv.slice(0, 5)).toEqual(["/bin/ai-jail", "--no-agent-state", "--no-docker", "--no-ssh", "--no-network"]);
+    expect(argv.slice(0, 7)).toEqual([
+      "/bin/ai-jail",
+      "--clean",
+      "--no-save-config",
+      "--no-agent-state",
+      "--no-docker",
+      "--no-ssh",
+      "--no-network",
+    ]);
     expect(argv).toContain("--");
     expect(argv.slice(-3)).toEqual(["sh", "-c", "true"]);
   });
@@ -115,6 +123,24 @@ describe("montagem do comando (R3.4: defaults seguros preservados)", () => {
     const { argv } = buildArgv({ ...req, network: true }, status);
     expect(argv).toContain("--network");
     expect(argv).not.toContain("--no-network");
+  });
+
+  /**
+   * Campo 01: config de projeto do ai-jail e politica monotonica, entao o que a
+   * corrida anterior gravou so pode tirar capacidade desta. Sem estas duas flags
+   * o proprio psh escrevia o `.ai-jail` que desligaria a rede do verificador
+   * seguinte, e o portao decidia em cima de metrica de corrida quebrada.
+   */
+  test("o psh nunca le nem grava o .ai-jail do projeto", () => {
+    const status: SandboxStatus = { mode: "ai-jail", detail: "t", jail_bin: "/bin/ai-jail", jail_version: "1" };
+    for (const network of [false, true]) {
+      const { argv } = buildArgv({ ...req, network }, status);
+      const corte = argv.indexOf("--");
+      expect(corte).toBeGreaterThan(0);
+      const flags = argv.slice(1, corte);
+      expect(flags).toContain("--clean");
+      expect(flags).toContain("--no-save-config");
+    }
   });
 });
 

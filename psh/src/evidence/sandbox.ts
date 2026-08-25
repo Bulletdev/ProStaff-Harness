@@ -150,7 +150,17 @@ export function buildArgv(req: RunRequest, status: SandboxStatus): { argv: strin
   }
   // R3.4: defaults do ai-jail preservados. Credencial de agente nunca montada;
   // rede so quando o verificador declara que precisa (R2.7).
-  const jailArgs = ["--no-agent-state", "--no-docker", "--no-ssh"];
+  //
+  // `--clean` e `--no-save-config` nao sao preferencia, sao a diferenca entre o
+  // contrato valer e nao valer. Sem eles o ai-jail grava a corrida atual no
+  // `.ai-jail` do projeto e le esse arquivo na corrida seguinte, e como config
+  // de projeto e politica monotonica (so restringe, nunca libera), o que a
+  // corrida anterior gravou desliga capacidade que esta corrida declarou. Na
+  // pratica o `--network` chegava uma corrida atrasado: o verificador com
+  // `network: true` rodava sem rede logo depois de um sem rede, o comando
+  // falhava por conexao em vez de por sandbox, e a metrica desse relatorio
+  // quebrado ainda assim virava valor de portao. Achado no Campo 01.
+  const jailArgs = ["--clean", "--no-save-config", "--no-agent-state", "--no-docker", "--no-ssh"];
   if (req.network) jailArgs.push("--network");
   else jailArgs.push("--no-network");
   return { argv: [status.jail_bin, ...jailArgs, "--", ...req.argv], wrapped: true };
