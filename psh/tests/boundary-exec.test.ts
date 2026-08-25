@@ -241,10 +241,29 @@ describe("montagem para o ai-jail (R3.1 camada 1, R3.4)", () => {
     expect(negados).not.toContain(join(layout.root, "src"));
   });
 
-  test("o .ai-jail que o sandbox grava nao vira violacao do agente", () => {
+  test("o argv desliga a configuracao persistida do ai-jail", () => {
+    const { layout, policy } = cenario();
+    const argv = montarArgvEnjaulado({ layout, policy, agentId: "backend", argv: ["true"] }, "/bin/ai-jail");
+    // Sem estas duas, o ai-jail grava um `.ai-jail` na raiz e o le na corrida
+    // seguinte: parte da fronteira passaria a vir de um arquivo que mora dentro
+    // da arvore que o agente edita.
+    expect(argv).toContain("--clean");
+    expect(argv).toContain("--no-save-config");
+  });
+
+  test("o id do agente vai no argv, porque a jaula zera o ambiente", () => {
+    const { layout, policy } = cenario();
+    const argv = montarArgvEnjaulado({ layout, policy, agentId: "backend", argv: ["true"] }, "/bin/ai-jail");
+    expect(argv).toContain("--env");
+    expect(argv).toContain("PSH_AGENT=backend");
+  });
+
+  test("configuracao de sandbox criada pelo enjaulado vira violacao", () => {
     const { layout, policy } = cenario();
     const bin = join(layout.root, "jail-que-escreve");
-    // Wrapper que imita o ai-jail: grava o proprio .ai-jail antes de executar.
+    // Wrapper que imita a versao antiga do ai-jail, que gravava o proprio
+    // `.ai-jail`. Hoje o argv desliga essa escrita, entao o arquivo aparecendo
+    // significa que alguem dentro da jaula o escreveu - e isso e violacao.
     writeFileSync(
       bin,
       '#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\necho config > "$(dirname "$0")/.ai-jail"\nexec "$@"\n',
@@ -257,14 +276,18 @@ describe("montagem para o ai-jail (R3.1 camada 1, R3.4)", () => {
       argv: ["sh", "-c", "true"],
       sandbox: { mode: "ai-jail", detail: "falso", jail_bin: bin, jail_version: "1" },
     });
-    expect(r.violations).toEqual([]);
+    expect(r.violations.map((v) => v.path)).toContain(".ai-jail");
+    expect(existsSync(join(layout.root, ".ai-jail"))).toBe(false);
   });
 
-  test("o arquivo de configuracao do proprio ai-jail nao entra no deny", () => {
+  test("configuracao de sandbox deixada na raiz entra no deny", () => {
     const { layout, policy } = cenario();
     writeFile(layout, ".ai-jail", "config\n");
     const negados = caminhosNegados({ layout, policy, agentId: "backend", argv: ["true"] });
-    expect(negados.some((n) => n.endsWith("/.ai-jail"))).toBe(false);
+    // Enquanto o sandbox gravava este arquivo, ele precisava ficar de fora do
+    // deny. Com `--no-save-config` ele e um arquivo qualquer do projeto, e a
+    // regra do agente vale para ele como para qualquer outro.
+    expect(negados.some((n) => n.endsWith("/.ai-jail"))).toBe(true);
   });
 
   test("agente com allowlist ampla nega so o deny duro", () => {

@@ -4,6 +4,474 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.3.0] - 2026-08-25
+
+Motor de memória (C5) e adapter `claude-code` (C8), que é a v0.3 inteira.
+
+Fica de fora a reescrita da página de sessão como narrativa (R5.2), que é chamada
+de modelo e depende do Maestro, e o servidor MCP que expõe as tools do núcleo ao
+agente (R5.6, R8.2), os dois declarados abaixo.
+
+A revisão desta metade caiu em cima do C3 e endureceu o motor de fronteira, o
+que está registrado mais abaixo.
+
+Entre escrever esta versão e publicá-la, ela foi ao campo pela primeira vez. O
+que voltou de lá está na seção do teste de campo, e é a parte mais importante
+deste changelog.
+
+### Adicionado
+
+- Página de memória em `.harness/memory/pages/<slug>.md`, markdown com cabeçalho
+  validado por JSON Schema.
+
+  O arquivo é a versão canônica; o SQLite é só índice, e pode ser apagado e
+  reconstruído sem perda. É a mesma divisão da evidência.
+
+- Índice FTS5 com frescor por hash do arquivo (R5.3).
+
+  Toda busca sincroniza o índice antes de responder: página editada fora do
+  `psh` entra na resposta seguinte, página corrompida sai do índice **com
+  aviso**, e o número de páginas examinadas vai na saída (R2.13).
+
+- Modo degradado declarado na busca: SQLite sem FTS5 responde por varredura de
+  substring, e diz que respondeu por varredura, no resultado e no `psh doctor`.
+
+- `psh remember "<fato>"` (R5.5), `psh memory
+  list|search|get|promote|consolidate|reindex` e `psh handoff` (R5.4).
+
+- `psh handoff` monta o bloco de retomada a partir do estado e da evidência em
+  disco, nunca de resumo de modelo: fase, tentativa, última decisão, o que
+  reprova o portão agora, memória fixada e o próximo comando.
+
+  É o caso de uso UC3: fechar a sessão às 18h por limite de plano e reabrir
+  amanhã, possivelmente em outro runtime.
+
+- `psh memory promote <slug>` leva a página para `docs/decisoes/` no
+  repositório e deixa a página apontando para o destino (R5.7).
+
+  Duas cópias sem ponteiro seriam duas verdades.
+
+- `psh memory consolidate` fecha a sessão numa página (R5.2), a partir da faixa
+  da trilha que ainda não foi consolidada.
+
+  Fases, verificadores, violações de fronteira, decisões humanas, anotações e
+  comandos, cada linha carregando o número da entrada que a originou.
+
+  A marca d'água mora em `.harness/memory/consolidation.json`, fora do índice,
+  e só avança depois de a página existir e a trilha registrar.
+
+### Decisões que valem registro
+
+- **A memória entra no deny duro da fronteira.**
+
+  O bloco de handoff é injetado no início da sessão seguinte. Memória que o
+  agente escreve à mão é texto que ele injeta em si mesmo depois, sem passar por
+  nenhuma porta do núcleo. Escrita de página é por `psh remember`, mesmo com
+  `write: ["**"]` na allowlist.
+
+- **O cabeçalho não aceita o que não consegue devolver.**
+
+  `psh remember --title $'x\npinned: false'` gravava a página, reportava sucesso
+  e deixava a anotação ilegível para sempre. Tag com vírgula voltava partida em
+  duas. Quebra de linha e vírgula agora param na porta de escrita, com o campo
+  nomeado: perder a anotação que o comando existe para guardar é pior do que
+  recusar o título.
+
+- **Promover não contorna a fronteira de quem promove.**
+
+  `psh memory promote x --to src/web/app.tsx --force` deixaria um agente com
+  allowlist `src/api/**` escrever fora dela com a assinatura do núcleo. O
+  destino passa pela fronteira do agente quando há agente; o humano continua
+  sendo a autoridade que define a allowlist.
+
+- **Symlink não é página.**
+
+  Ele não era lido, mas também não era contado nem nomeado em lugar nenhum, o
+  que contraria o R2.13. Agora entra na contagem e sai nomeado na lista de
+  ignorados, e `psh memory get` recusa pelo mesmo motivo que a enumeração.
+
+- **A consulta do usuário nunca é sintaxe de FTS.**
+
+  Cada termo vira literal entre aspas com prefixo. Quem digita
+  `psh memory search "NOT ai-jail"` está procurando essas três palavras, não
+  escrevendo expressão booleana, e um termo com `*`, `(` ou `"` não derruba a
+  busca nem vira operador por acidente.
+
+- **O slug é conferido antes de virar caminho.**
+
+  Minúscula, dígito e hífen. `psh memory get ../../etc/passwd` para no alfabeto,
+  não no sistema de arquivos (R2.14).
+
+- **A página fixada vem antes da relevância na ordenação.**
+
+  R5.5 diz que ela não pode ser perdida na consolidação, e ser empurrada para
+  fora do limite da busca é uma forma de perder.
+
+- **`.harness/memory/` fica fora do repositório.**
+
+  A faixa é transitória por definição (R5.7). O que precisa sobreviver com
+  garantia sai dela por `psh memory promote` e vira arquivo versionado, que entra
+  em revisão como qualquer outro.
+
+- **Cabeçalho de página é lido em modo estrito.**
+
+  Campo desconhecido, campo repetido ou fechamento ausente derrubam a leitura.
+  Página meio lida vira contexto errado na sessão seguinte, e contexto errado não
+  avisa que está errado.
+
+- **O bloco de retomada tem teto declarado.**
+
+  Ele vai para o início da sessão seguinte, e janela útil é recurso medido
+  (R7.2). Doze páginas fixadas, quatrocentos caracteres por corpo, e o que ficou
+  de fora sai dito no próprio bloco, com o comando que traz o resto.
+
+- **A trilha é a captura (R5.1).**
+
+  Decisão de fase, resultado de verificador e anotação já entram nela por R4.3,
+  encadeados por hash e conferíveis por `psh audit verify`. Guardar uma segunda
+  cópia dos mesmos fatos num buffer paralelo criaria duas versões da mesma
+  sessão, e a segunda não teria como provar que é verdadeira.
+
+  O que falta é prompt do usuário, que só o adapter enxerga.
+
+- **A consolidação não resume a si mesma.**
+
+  Ela grava uma entrada `memory.write` ao terminar. Sem filtrar essa entrada,
+  rodar o comando três vezes seguidas produzia três páginas, e as duas últimas
+  só falavam da anterior.
+
+- **Trilha comprometida não vira memória.**
+
+  A consolidação verifica a cadeia antes de resumir. Assinar como memória um
+  relato que a própria cadeia não sustenta seria fabricar prova.
+
+- **A narrativa por LLM não foi improvisada.**
+
+  R5.2 pede a página reescrita como narrativa, e isso é chamada de modelo pelo
+  Maestro, que é v0.4. Em vez de chamar modelo por fora do roteador, a página
+  sai montada da trilha, com o número de cada entrada, e diz na própria página
+  que foi montada sem modelo. Quando o C6 entrar, a narrativa vira uma reescrita
+  por cima deste texto.
+
+### Adapter `claude-code` (R8.1, R8.2)
+
+- Cinco pontos de extensão registrados em `.claude/settings.json`, em **forma
+  exec**: o runtime executa o binário direto, com os argumentos em lista, sem
+  shell no meio.
+
+  Caminho de instalação com aspas, cifrão ou crase nunca chega a um parser de
+  shell. É a mesma postura do R2.14 para expressão regular.
+
+- `SessionStart` injeta as regras do harness e o bloco de retomada (R5.4).
+  `UserPromptSubmit` captura o prompt, que era a única peça do R5.1 que a trilha
+  não via sozinha. `PreToolUse` aplica a fronteira antes da escrita acontecer.
+  `PostToolUse` avisa quando a escrita derrubou o frescor de uma evidência.
+  `SessionEnd` consolida a sessão.
+
+- `psh adapter claude-code install|uninstall|status|contract|hook`.
+
+- A poda é de duas pontas e por handler (R8.6f): instalar remove o registro
+  antigo do psh, preserva hook de terceiro no mesmo evento, e conta quantos
+  apontavam para artefato ausente.
+
+- `psh doctor` reporta quantos pontos de extensão estão ativos (R8.6c). Quatro
+  de cinco é falha visível, porque significa uma responsabilidade do R8.1 que
+  simplesmente não acontece.
+
+### O contrato saiu do binário, não da documentação (R8.6b, R8.6g)
+
+Este é o modo de falha mais provável e mais silencioso do projeto, e a seção 3.2
+do PRD registra duas ocorrências na casa: 881 linhas de plugin morto no harness
+de referência, e os três mecanismos do `prostaff-hooks` que nunca responderam
+porque o campo se chamava `prompt` e o código dizia `message`.
+
+Então nenhum nome foi escrito de memória. Todos saíram do artefato instalado do
+Claude Code 2.1.238, e ficam em `contract.json`, conferidos símbolo a símbolo
+por `psh adapter claude-code contract`, que lê o binário e reprova o que não
+existe.
+
+O que a leitura do binário mostrou e a documentação não diria:
+
+- O runtime aceita **31** eventos de hook, não os oito de sempre.
+
+- `PreToolUse` aceita `permissionDecision: "defer"` além de allow, deny e ask.
+
+- A entrada de hook aceita `args`, a forma exec, que é como o adapter registra.
+
+- `SessionEnd` existe e é onde a consolidação pertence. `Stop` dispara ao fim de
+  cada turno, e consolidar ali geraria uma página por resposta do modelo.
+
+**A validação foi verificada de ponta a ponta numa sessão real**, pelo ponto de
+entrada do usuário e sem gastar turno de modelo (R8.6d). O log do próprio
+runtime registra `Successfully parsed and validated hook JSON output` e
+`Hook SessionStart provided additionalContext (1253 chars)`, e o efeito foi
+conferido em disco (R8.6e): duas entradas na trilha e a página de sessão gerada.
+
+Um caminho continua sem prova em sessão real: `PreToolUse` e `PostToolUse`
+exigem uma chamada de tool, que exige turno de modelo. Eles estão cobertos por
+teste do handler e pelo mesmo registro que o `SessionStart` usa.
+
+### Não entregue, e declarado
+
+- **Servidor MCP com as tools do núcleo** (R5.6, R8.2). O agente hoje fala com o
+  harness por linha de comando, não por tool.
+
+- **Compressor de saída** (R8.7).
+
+- **Registro de toda chamada de tool na trilha** (R4.3). Hoje entram sessão,
+  prompt e decisão de fronteira negada. Registrar toda tool call somaria um
+  `fsync` por chamada, e isso precisa de medição antes de virar padrão.
+
+### Corrigido no motor de auditoria
+
+- **Uma escrita nova consertava a âncora de uma trilha adulterada.**
+
+  A âncora existe para pegar reescrita coordenada (R4.1), mas quem a conferia era
+  só o `verify`. Como todo `append` regrava a âncora com o topo novo, bastava
+  uma escrita qualquer depois da adulteração, `psh remember` ou o hook de fim de
+  sessão, para a cadeia voltar a fechar e o estrago sumir do relatório.
+
+  Agora o `append` recusa escrever numa trilha que não bate com a própria
+  âncora. A conferência é por contagem de linha e hash do topo, sem re-hashear a
+  cadeia inteira: remoção no meio muda a contagem, edição ou religamento mudam o
+  topo.
+
+  Achado por um teste do adapter que esperava a consolidação falhar numa trilha
+  quebrada e viu ela passar.
+
+### Corrigido fora do escopo da memória
+
+- **Flag de traço simples nunca existiu no parser.**
+
+  `psh audit log -n 5` virava dois posicionais ignorados: o comando respondia com
+  o limite padrão e sem erro nenhum. Pior, o `-n` chegava a comando que lê
+  posicional e virava nome de coisa.
+
+  Agora argumento que parece flag e não é flag falha dizendo qual é a forma
+  certa, e o uso continua possível depois de `--`. O texto de ajuda, que
+  documentava `-n`, passou a documentar `--n`.
+
+- **`--n abc` chegava ao `LIMIT` do SQLite.**
+
+  O usuário via `datatype mismatch` com pilha de exceção no lugar de "use um
+  número". Erro de uso é falha de uso, não erro inesperado.
+
+### Corrigido no motor de fronteira
+
+- **O `ai-jail` gravava a própria configuração dentro do projeto.**
+
+  Por padrão ele escreve um `.ai-jail` na raiz e o lê na execução seguinte. O
+  arquivo mora na árvore que o agente edita, e parte da montagem passaria a vir
+  de algo que o próprio enjaulado escreve, que é exatamente o G4.
+
+  Na prática ele também acumulava lixo: cada corrida somava os `deny_paths` de
+  novo, guardados como `~/...`, e o `ai-jail` os reabria como `<raiz>/~/...`,
+  avisando `rule not applied` para regra que não existia. A regra que valia
+  continuava sendo a do argv, medido, mas o ruído escondia o aviso de verdade.
+
+  O argv passou a levar `--clean --no-save-config`. A jaula é montada só a
+  partir do contrato do `psh`.
+
+- **O `.ai-jail` estava fora do relatório de violação.**
+
+  A exceção existia porque o sandbox escrevia o arquivo. Com a escrita
+  desligada, ela só servia para deixar passar uma cópia feita pelo agente. O
+  conjunto de arquivos perdoados ficou vazio, e o arquivo entra no deny como
+  qualquer outro.
+
+- **A jaula zera o ambiente do processo filho.**
+
+  `PSH_AGENT` no `env` do spawn chega vazio lá dentro. A marca de qual agente
+  está executando vai explícita no argv, por `--env`, para que o núcleo saiba
+  quem pediu a ação também dentro da jaula.
+
+### O primeiro teste de campo, e o que ele devolveu
+
+Antes de publicar, a versão foi rodada fora da suíte contra um projeto real que
+chama LLM de verdade: `promptfoo-demo-evals/multilingo-language-app`, com ai-jail
+1.20.1, verificador `evals` gastando API da Anthropic e da OpenAI, e uma sessão
+real do Claude Code sob os cinco hooks.
+
+O laudo está em `DEVDOCS/CAMPO-01-multilingo.md` e o roteiro que reproduz tudo no
+terminal está em `.verificacao/campo-multilingo/run.sh`.
+
+Tudo o que o marco promete se sustentou, e saíram dez achados. Cinco foram
+corrigidos antes desta publicação, e estão abaixo. Os outros cinco seguem
+abertos e declarados no laudo e no README: nenhum deles produz valor de portão
+errado, que foi o critério para não segurar a versão.
+
+O padrão que os dois achados graves têm em comum virou regra do projeto: **a
+infraestrutura usada para observar um workspace não pode modificar o conjunto de
+arquivos que está sendo observado**, e `sandbox(corrida atual)` não depende de
+`sandbox(corrida anterior)`.
+
+### Adicionado depois do campo
+
+- **`psh audit reanchor --reason "..."`, o caminho de volta para trilha e âncora
+  divergentes.**
+
+  A recusa de escrever numa trilha que não bate com a âncora funciona e está
+  certa, mas ela travava o projeto para qualquer operação que escreva na trilha,
+  ou seja, praticamente todas. A mensagem mandava rodar `psh audit verify`, que
+  só confirma o diagnóstico, e nenhum comando resolvia. Sobrava mexer no
+  `.harness` na mão, que é exatamente como evidência de adulteração desaparece.
+
+  Reancorar não conserta a trilha nem finge que a divergência não houve: grava na
+  própria trilha, como `audit.note`, o que a âncora dizia, o que o arquivo diz,
+  quem decidiu e por quê, e só então move a âncora para o topo real. A
+  divergência vira cicatriz permanente e legível.
+
+  O `--reason` é obrigatório, porque o valor do comando está em deixar escrito
+  por que se decidiu seguir, não em silenciar o alarme.
+
+  E ele recusa quando o defeito está **dentro** do arquivo (linha corrompida,
+  `seq` fora de ordem, elo quebrado, hash que não fecha): aí a âncora não é o
+  problema, e mover a âncora só trocaria um relatório vermelho por outro.
+
+  Achado 10 do Campo 01.
+
+### Corrigido depois do campo
+
+- **A jaula de uma corrida contaminava a corrida seguinte.**
+
+  `buildArgv` não passava `--clean` nem `--no-save-config`, então o ai-jail
+  gravava a configuração da corrida no `.ai-jail` do projeto e a lia na corrida
+  seguinte. Config de projeto do ai-jail é política monotônica: ela só aperta, e
+  a linha de comando não reabre o que ela fechou.
+
+  Consequência medida: um verificador com `network: true` rodava **sem rede**
+  logo depois de um sem rede. O `curl` saía com 6, o promptfoo contabilizava oito
+  erros de conexão e ainda assim produzia relatório com `successes: 0`, o `psh`
+  extraía esse zero e o portão decidia em cima dele. Métrica de corrida cujo
+  contrato de sandbox não foi cumprido, sem nada na saída dizendo isso.
+
+  O `psh exec` já passava as duas flags. Os dois pontos de entrada da jaula
+  discordavam entre si, e o errado era justamente o que produz valor de portão.
+
+  A invariante que isso cristaliza: `sandbox(corrida atual)` não depende de
+  `sandbox(corrida anterior)`. Coberta por teste de integração nas duas ordens,
+  com rede real.
+
+  Achado 1 do Campo 01.
+
+- **A jaula sujava a árvore observada durante a corrida.**
+
+  Mesma causa, consequência diferente: como o `.ai-jail` era escrito **durante** a
+  execução, qualquer verificador que observe `**` falhava com
+  `workspace-mutated-during-run` - inclusive o `secrets`, que vem no `common.json`
+  do próprio pacote com `watch: ["**"]`. Um verificador que roda `/bin/true`
+  reprovava.
+
+  Achado 2 do Campo 01.
+
+- **O artefato de runtime do próprio harness entrava no cálculo de frescor.**
+
+  A lista de exclusão cobria quatro caminhos enquanto o `Layout` já tinha sete
+  diretórios de runtime, então `memory/`, `approvals/`, `reviews/` e `tmp/`
+  contavam como mudança do workspace. Um `psh memory consolidate` entre a medição
+  e o portão derrubava a evidência de quem observa `**`, citando arquivo que
+  nenhum verificador escreveu.
+
+  Num projeto Git o `.harness/.gitignore` mascarava parte disso; fora do Git, ou
+  num app dentro de um repositório maior, aparecia inteiro.
+
+  A classificação agora é explícita nos dois sentidos, em `HARNESS_RUNTIME_PATHS`
+  e `HARNESS_OBSERVABLE_PATHS`, e há teste que cobra que todo caminho do `Layout`
+  esteja num dos dois. O defeito não foi a lista estar errada, foi ela ter
+  envelhecido calada enquanto o `Layout` crescia.
+
+  A exclusão passou a aparecer contada e nomeada no manifesto da evidência
+  (`harness_artifacts`): exclusão silenciosa é como um arquivo deixa de ser visto
+  sem ninguém perceber.
+
+  Resíduo do achado 2 do Campo 01.
+
+- **O relatório de CI dizia que não havia motor de fronteira.**
+
+  `boundary_engine` era o literal `"absent"`, declaração da v0.1 que ninguém
+  atualizou quando o motor entrou na v0.2. No mesmo projeto e no mesmo instante o
+  `psh status` dizia `fronteira mount` e o `psh doctor` dizia `fronteira aplicada
+  por mount do ai-jail`, enquanto o JSON de CI dizia o contrário.
+
+  O campo virou `boundary: { mode, agents, detail }` e sai da mesma função que
+  alimenta o `status`. Duas declarações paralelas do mesmo fato era o defeito, não
+  o valor errado, e há teste exigindo que os dois digam a mesma coisa.
+
+  Mudança no formato do relatório: quem consumia `boundary_engine` passa a ler
+  `boundary.mode`.
+
+  Achado 3 do Campo 01.
+
+- **Projeto em subdiretório de repositório perdia o `.gitignore`.**
+
+  `isGitRepo` era `existsSync(join(root, ".git"))`, que só acerta o projeto que é
+  a raiz do repositório. Todo app dentro de um repositório maior, que é o layout
+  de qualquer monorepo, caía para caminhada, e aí o `.gitignore` deixava de valer
+  para o hash da árvore.
+
+  Efeito medido na cobaia: entraram no hash o `.env` com chave real, o diretório
+  de relatório do promptfoo e um binário de node de 100 MB que precisou ser
+  vendorizado. O `psh doctor` declarava isso como `[ok] enumeracao por
+  caminhada`, com o detalhe "projeto nao e repositorio Git", que é falso - e o
+  `checkSecrets` do mesmo doctor usava `git ls-files` no mesmo diretório sem
+  problema nenhum.
+
+  Quem responde agora é o próprio Git, por `git rev-parse --is-inside-work-tree`.
+  O fallback pelo diretório continua existindo para um caso só, o `git` não ter
+  respondido, porque é ele que mantém o `walk-fallback` visível em vez de virar
+  caminhada silenciosa.
+
+  Achado 4 do Campo 01.
+
+### Desempenho
+
+- **O ajv compilava todo schema no import, em toda invocação.**
+
+  Medido no binário compilado, com um projeto real: `psh --version` levava
+  185 ms contra 2 ms do `bun` cru, e 181 desses 185 iam embora antes de a
+  primeira linha de lógica rodar. Compilar JSON Schema é geração de código, e
+  isso acontecia no escopo de módulo, para os sete schemas, mesmo em comando que
+  não valida nada.
+
+  Isso importa porque o hook do adapter roda **uma vez por chamada de tool**: a
+  mesma partida entrava no caminho crítico de cada escrita da sessão.
+
+  Os validadores passaram a compilar na primeira vez que são usados. A interface
+  do ajv foi mantida, incluindo `.errors`, então nenhum ponto de uso mudou.
+
+  Medido depois: `psh --version` caiu de 185 ms para 53 ms, e o hook de
+  `PreToolUse` de 200 ms para 156 ms.
+
+  O que sobra do custo está atribuído: a decisão de fronteira em si leva 1 ms, o
+  `loadBoundary` leva 38 ms compilando o schema da allowlist sob demanda, e o
+  resto é partida do binário. Baixar mais exige validador pré-compilado em tempo
+  de build, que é mudança de pipeline.
+
+### Qualidade
+
+- 524 testes, acima dos 326 da v0.2.0, todos passando **também com o `ai-jail`
+  real ligado e com rede**, sem nenhum pulado.
+
+- Cobertura de linha de 98,43% no projeto, 100% em `memory/search.ts`,
+  `memory/consolidate.ts`, `audit/chain.ts`, `cli/args.ts` e `util/paths.ts`.
+
+- A validação de contrato roda também contra um artefato controlado, para o
+  caminho ser exercitado em máquina sem o Claude Code instalado.
+
+- Cinco casos novos na suíte de integração com a jaula real: nenhuma
+  configuração deixada no projeto, a terceira corrida enjaula igual à primeira,
+  configuração plantada na raiz não muda a fronteira, o id do agente atravessa a
+  jaula, e a memória fica fora de alcance pelo kernel.
+
+- Cada correção vinda do campo foi exercitada **contra o próprio defeito** antes
+  de valer como regressão: com a correção revertida, os testes falham; com ela,
+  passam. Sem isso um teste de regressão é só um teste a mais.
+
+- Os cinco testes de jaula que provam a invariante do sandbox mediram rede de
+  verdade, nas duas ordens de execução. Eles ficavam `skip` porque o AppArmor do
+  `bun` instalado por snap nega `exec` de binário de fora do confinamento, e o
+  README do `psh` agora diz como sair disso.
+
 ## [0.2.0] - 2026-08-22
 
 Motor de fronteira (C3).

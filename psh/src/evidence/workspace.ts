@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { sha256 } from "../util/hash.ts";
 import { compileGlobs, normalizeRel } from "../util/globs.ts";
+import { HARNESS_RUNTIME_PATHS } from "../util/paths.ts";
 
 /** Separador de `git ls-files -z`. */
 const NUL = String.fromCharCode(0);
@@ -26,6 +27,14 @@ export interface WorkspaceManifest {
   enumeration: Enumeration;
   files: Record<string, string>;
   hash: string;
+  /**
+   * Artefato do proprio harness descartado antes de casar com `watch`, contado e
+   * nomeado. A exclusao existe para o observador nao se medir, mas ela precisa
+   * aparecer no registro: exclusao silenciosa e como um arquivo deixa de ser
+   * visto sem ninguem perceber.
+   */
+  harness_artifacts_skipped: number;
+  harness_artifacts_excluded: readonly string[];
 }
 
 export interface GitProbe {
@@ -59,14 +68,6 @@ export interface HashOptions {
 
 const WALK_SKIP_DIRS = new Set([".git", "node_modules", ".venv", "target", "dist", "coverage"]);
 
-/** Caminhos internos do harness que nunca entram no calculo de frescor. */
-const ALWAYS_EXCLUDED_PREFIXES = [
-  ".harness/evidence/",
-  ".harness/audit/",
-  ".harness/harness.db",
-  ".harness/state.json",
-];
-
 /**
  * R2.4: hash da arvore dos paths observados.
  * Arquivos rastreados e nao rastreados, respeitando `.gitignore` quando o
@@ -95,9 +96,13 @@ export function hashWorkspace(root: string, opts: HashOptions): WorkspaceManifes
   const perPattern = new Map<string, number>(include.patterns.map((p) => [p, 0]));
   const files: Record<string, string> = {};
   let matched = 0;
+  let harness_artifacts_skipped = 0;
 
   for (const rel of candidates) {
-    if (isAlwaysExcluded(rel)) continue;
+    if (isHarnessRuntime(rel)) {
+      harness_artifacts_skipped += 1;
+      continue;
+    }
     const pattern = include.matchedBy(rel);
     if (pattern === null) continue;
     if (exclude?.matches(rel)) continue;
@@ -129,6 +134,8 @@ export function hashWorkspace(root: string, opts: HashOptions): WorkspaceManifes
     enumeration,
     files,
     hash: `sha256:${sha256(lines)}`,
+    harness_artifacts_skipped,
+    harness_artifacts_excluded: HARNESS_RUNTIME_PATHS,
   };
 }
 
@@ -157,14 +164,39 @@ export function diffManifests(
   return { changed: changed.sort(), added: added.sort(), removed: removed.sort() };
 }
 
-function isAlwaysExcluded(rel: string): boolean {
-  for (const prefix of ALWAYS_EXCLUDED_PREFIXES) {
+/**
+ * Comparacao por prefixo declarado, nao por "comeca com `.harness/`": o contrato
+ * e os documentos de fase moram no mesmo diretorio e continuam observaveis.
+ */
+function isHarnessRuntime(rel: string): boolean {
+  for (const prefix of HARNESS_RUNTIME_PATHS) {
     if (rel === prefix || rel.startsWith(prefix)) return true;
   }
   return false;
 }
 
+/**
+ * Quem responde se o projeto esta sob Git e o proprio Git, nao a presenca de um
+ * `.git/` na raiz.
+ *
+ * `existsSync(join(root, ".git"))` so acerta o caso do projeto que e a raiz do
+ * repositorio. Todo app dentro de um repositorio maior, que e o layout de
+ * qualquer monorepo, caia para caminhada: o `.gitignore` deixava de valer para o
+ * hash da arvore, e entravam nele o `.env` com chave real, o diretorio de
+ * relatorio e ate binario vendorizado. O `psh doctor` ainda declarava isso como
+ * `[ok] enumeracao por caminhada`, com o detalhe "projeto nao e repositorio
+ * Git", que era falso. Achado 4 do Campo 01.
+ *
+ * O fallback pelo diretorio continua existindo para um caso so: o `git` nao
+ * respondeu. Ai a resposta honesta e "ha `.git/` e nao consigo perguntar", que e
+ * o que mantem o `walk-fallback` visivel em vez de virar caminhada silenciosa.
+ */
 export function isGitRepo(root: string): boolean {
+  const res = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (!res.error && res.status === 0) return res.stdout.trim() === "true";
   return existsSync(join(root, ".git"));
 }
 

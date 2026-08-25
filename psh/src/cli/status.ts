@@ -4,6 +4,12 @@ import { detectSandbox } from "../evidence/sandbox.ts";
 import { evaluateGate, type GateResult } from "../gate/evaluate.ts";
 import { loadBoundary } from "../boundary/policy.ts";
 
+export interface BoundaryReport {
+  mode: "mount" | "degradado" | "indisponivel";
+  agents: number;
+  detail: string;
+}
+
 export interface StatusReport {
   profile: string;
   phase: string | null;
@@ -13,13 +19,18 @@ export interface StatusReport {
   max_auto_retries: number | null;
   status: string;
   sandbox: { mode: string; detail: string };
-  boundary: { mode: "mount" | "degradado" | "indisponivel"; agents: number; detail: string };
+  boundary: BoundaryReport;
   gate: GateResult | null;
   audit: { ok: boolean; entries: number; problems: number };
   history: { phase: string; attempt: number; verdict: string; at: string }[];
 }
 
-function descreverFronteira(ctx: ProjectContext, modo: string): StatusReport["boundary"] {
+/**
+ * Fonte unica do estado da fronteira. O adapter `ci` chama esta mesma funcao:
+ * duas declaracoes paralelas do mesmo fato foi como o relatorio de CI passou uma
+ * versao inteira dizendo `absent` enquanto o `status` dizia `mount`.
+ */
+export function descreverFronteira(ctx: ProjectContext, modo: string): BoundaryReport {
   try {
     const policy = loadBoundary(ctx.layout);
     return modo === "ai-jail"

@@ -1,0 +1,71 @@
+{
+  "_type": "psh-adapter-contract",
+  "version": 1,
+  "runtime": "claude-code",
+  "description": "R8.6b / R8.6g: nome de evento, campo de payload e chave de configuracao nunca sao escritos de memoria. Cada simbolo desta lista e conferido contra o artefato do runtime instalado por 'psh adapter claude-code contract'. O que o adapter usa e o que esta aqui, e nada alem.",
+  "verified_against": {
+    "version": "2.1.238",
+    "artifact": "binario unico ELF com o bundle JS embutido",
+    "method": "varredura de simbolo no artefato instalado, nunca na documentacao",
+    "verified_at": "2026-08-23"
+  },
+  "events": {
+    "SessionStart": {
+      "usa": "injeta o bloco de retomada e as regras do harness (R5.4, R8.1)",
+      "payload": ["hook_event_name", "session_id", "transcript_path", "cwd", "source"],
+      "output": ["hookEventName", "additionalContext"]
+    },
+    "UserPromptSubmit": {
+      "usa": "captura o prompt do usuario, a peca do R5.1 que a trilha nao ve sozinha",
+      "payload": ["hook_event_name", "session_id", "cwd", "prompt"],
+      "output": ["hookEventName", "additionalContext"]
+    },
+    "PreToolUse": {
+      "usa": "fronteira de escrita antes da tool rodar (R3.1, R8.1)",
+      "payload": ["hook_event_name", "session_id", "cwd", "tool_name", "tool_input", "tool_use_id", "file_path", "notebook_path"],
+      "output": ["hookEventName", "permissionDecision", "permissionDecisionReason"]
+    },
+    "PostToolUse": {
+      "usa": "avisa quando a escrita derrubou o frescor de uma evidencia (R2.4)",
+      "payload": ["hook_event_name", "session_id", "cwd", "tool_name", "tool_input", "tool_response", "tool_use_id"],
+      "output": ["hookEventName", "additionalContext"]
+    },
+    "SessionEnd": {
+      "usa": "consolida a sessao em pagina de memoria (R5.2)",
+      "payload": ["hook_event_name", "session_id", "cwd", "reason"],
+      "output": []
+    }
+  },
+  "permission_decisions": ["allow", "deny", "ask"],
+  "settings": {
+    "arquivo": ".claude/settings.json",
+    "chaves": ["hooks"],
+    "forma": "hooks.<Evento>[].matcher e hooks.<Evento>[].hooks[]",
+    "entrada_de_hook": ["type", "command", "args", "timeout"],
+    "tipo_de_hook": "command",
+    "forma_exec": "com 'args' presente o 'command' e resolvido como executavel e recebe os argumentos direto, sem shell. Caminho com aspas, cifrao ou crase nunca chega a um parser de shell, que e a mesma postura do R2.14 para regex."
+  },
+  "simbolos_conferidos": [
+    "PreToolUse",
+    "PostToolUse",
+    "UserPromptSubmit",
+    "SessionStart",
+    "SessionEnd",
+    "hook_event_name",
+    "session_id",
+    "transcript_path",
+    "tool_name",
+    "tool_input",
+    "tool_response",
+    "tool_use_id",
+    "hookSpecificOutput",
+    "hookEventName",
+    "additionalContext",
+    "permissionDecision",
+    "permissionDecisionReason",
+    "prompt",
+    "file_path",
+    "notebook_path",
+    "Argument list for exec form"
+  ]
+}

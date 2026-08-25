@@ -4,6 +4,8 @@ import { runVerify, type VerifyOutcome } from "../cli/verify.ts";
 import { advance, type AdvanceOutcome } from "../workflow/advance.ts";
 import { evaluateGate, type GateResult } from "../gate/evaluate.ts";
 import { currentAttempt } from "../cli/context.ts";
+import { descreverFronteira, type BoundaryReport } from "../cli/status.ts";
+import { detectSandbox } from "../evidence/sandbox.ts";
 import { selfArgv } from "../util/self.ts";
 import { PSH_VERSION } from "../version.ts";
 
@@ -29,7 +31,18 @@ export interface CiReport {
   phase: string | null;
   attempt: number;
   sandbox_mode: string;
-  boundary_engine: "absent";
+  /**
+   * Campo 01, achado 3: isto era o literal `"absent"`, declaracao da v0.1 que
+   * ninguem atualizou quando o motor de fronteira entrou na v0.2. No mesmo
+   * projeto e no mesmo instante o `status` dizia `fronteira mount` e este
+   * relatorio dizia que fronteira nao havia, entao quem consumia o JSON no CI
+   * concluia o contrario do que estava acontecendo.
+   *
+   * Agora sai da mesma funcao que alimenta o `psh status`, e nao de uma segunda
+   * declaracao paralela: duas fontes para o mesmo fato foi o defeito, nao o
+   * valor errado.
+   */
+  boundary: BoundaryReport;
   verify: {
     ran: { verifier: string; status: string; value: number | null; exit_code: number | null; error: string | null }[];
     considered: number;
@@ -97,7 +110,7 @@ export function runCi(opts: CiOptions): CiReport {
     phase: phaseId,
     attempt: verify?.attempt ?? currentAttempt(ctx, phaseId),
     sandbox_mode: verify?.sandbox_mode ?? "degraded",
-    boundary_engine: "absent",
+    boundary: descreverFronteira(ctx, verify?.sandbox_mode ?? detectSandbox().mode),
     verify:
       verify === null
         ? null
@@ -130,7 +143,10 @@ export function runCi(opts: CiOptions): CiReport {
 export function renderCi(report: CiReport): string {
   const lines: string[] = [];
   lines.push(`psh ${report.psh} | adapter ci | fase ${report.phase ?? "(sem fase)"} tentativa ${report.attempt}`);
-  lines.push(`sandbox ${report.sandbox_mode} | fronteira ${report.boundary_engine} | trilha ${report.audit_ok ? "integra" : "COMPROMETIDA"}`);
+  lines.push(
+    `sandbox ${report.sandbox_mode} | fronteira ${report.boundary.mode} (${report.boundary.agents} agente(s)) | ` +
+      `trilha ${report.audit_ok ? "integra" : "COMPROMETIDA"}`,
+  );
   if (report.verify !== null) {
     for (const r of report.verify.ran) {
       lines.push(`  ${r.status === "ok" ? "ok " : "NAO"} ${r.verifier}: ${r.error ?? (r.value ?? `exit ${r.exit_code}`)}`);

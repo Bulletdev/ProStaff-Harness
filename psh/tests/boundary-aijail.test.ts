@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { BoundaryPolicy } from "../src/boundary/policy.ts";
 import { execUnderBoundary } from "../src/boundary/execute.ts";
 import { layoutFor, type Layout } from "../src/util/paths.ts";
+import { runVerifier } from "../src/evidence/runner.ts";
+import type { VerifierSpec } from "../src/workflow/types.ts";
 import type { SandboxStatus } from "../src/evidence/sandbox.ts";
 
 /**
@@ -134,7 +136,7 @@ describe.skipIf(!JAIL_OK)("fronteira aplicada pelo kernel, com ai-jail real", ()
     expect(r.violations[0]!.action).toBe("deleted");
   });
 
-  test("o .ai-jail que o proprio sandbox grava nao vira violacao do agente", () => {
+  test("corrida limpa nao inventa violacao", () => {
     const { layout, policy } = projetoForaDoTmp();
     const r = comJaula(layout, policy, "true");
     expect(r.violations).toEqual([]);
@@ -145,5 +147,196 @@ describe.skipIf(!JAIL_OK)("fronteira aplicada pelo kernel, com ai-jail real", ()
     // Sem rede a resolucao de nome falha; o teste so exige que nao tenha sucesso.
     const r = comJaula(layout, policy, "getent hosts example.com >/dev/null 2>&1");
     expect(r.exit_code).not.toBe(0);
+  });
+});
+
+describe.skipIf(!JAIL_OK)("a jaula e montada so a partir do contrato do psh", () => {
+  test("nenhum arquivo de configuracao e deixado no projeto", () => {
+    const { layout, policy } = projetoForaDoTmp();
+    comJaula(layout, policy, "true");
+    // Por padrao o ai-jail grava um `.ai-jail` na raiz e o le na proxima
+    // corrida. O arquivo mora dentro da arvore que o agente edita, e a fronteira
+    // nao pode depender, nem em parte, de algo que o enjaulado escreve.
+    expect(existsSync(join(layout.root, ".ai-jail"))).toBe(false);
+  });
+
+  test("a segunda corrida enjaula igual a primeira", () => {
+    const { layout, policy } = projetoForaDoTmp();
+    for (const tentativa of [1, 2, 3]) {
+      const r = comJaula(layout, policy, `echo invadido-${tentativa} > src/web/app.tsx`);
+      expect(r.exit_code).not.toBe(0);
+      expect(ler(layout, "src/web/app.tsx")).toBe("web original\n");
+      expect(r.stderr).not.toContain("rule not applied");
+    }
+  });
+
+  test("configuracao plantada na raiz nao muda a fronteira", () => {
+    const { layout, policy } = projetoForaDoTmp();
+    writeFileSync(
+      join(layout.root, ".ai-jail"),
+      'command = ["true"]\ndeny_paths = []\nnetwork = true\n',
+    );
+    const r = comJaula(layout, policy, "echo invadido > src/web/app.tsx");
+    expect(r.exit_code).not.toBe(0);
+    expect(ler(layout, "src/web/app.tsx")).toBe("web original\n");
+  });
+
+  test("a memoria fica fora de alcance do agente, pelo kernel (R5.4)", () => {
+    const { layout, policy } = projetoForaDoTmp();
+    mkdirSync(layout.memoryPagesDir, { recursive: true });
+    writeFileSync(join(layout.memoryPagesDir, "fato.md"), "pagina original\n");
+
+    const r = comJaula(layout, policy, "echo injetado > .harness/memory/pages/fato.md");
+
+    // O bloco de handoff entra no inicio da sessao seguinte: memoria que o
+    // agente escreve e texto que ele injeta em si mesmo depois.
+    expect(r.exit_code).not.toBe(0);
+    expect(ler(layout, ".harness/memory/pages/fato.md")).toBe("pagina original\n");
+    expect(r.violations).toEqual([]);
+  });
+
+  test("o id do agente atravessa a jaula, que zera o ambiente do filho", () => {
+    const { layout, policy } = projetoForaDoTmp();
+    // Medido contra o 1.19.2: sem `--env` explicito no argv, `PSH_AGENT` chega
+    // vazio la dentro e `psh remember` do agente nasceria assinado como humano.
+    const r = comJaula(layout, policy, 'printf "[%s]" "$PSH_AGENT"');
+    expect(r.stdout).toContain("[backend]");
+  });
+});
+
+/**
+ * Campo 01, achado 1 e 2.
+ *
+ * O `.ai-jail` de projeto e politica monotonica: ele so restringe, e a linha de
+ * comando nao consegue reabrir o que ele fechou. Enquanto o `psh exec` ja
+ * passava `--clean --no-save-config`, o caminho do verificador nao passava, e
+ * era justamente o caminho que produz valor de portao.
+ *
+ * O sintoma media dinheiro: o proprio psh gravava `.ai-jail` com `network =
+ * false` ao rodar um verificador sem rede, e o verificador seguinte, declarado
+ * com `network: true`, rodava sem rede. O comando falhava por conexao, o
+ * relatorio saia com zero acerto, e esse zero virava valor de portao.
+ *
+ * O teste usa `lockdown` em vez de rede porque o efeito e o mesmo (config de
+ * projeto apertando a corrida) e nao depende de internet para ser observado.
+ */
+describe.skipIf(!JAIL_OK)("config de projeto do ai-jail nao alcanca o verificador", () => {
+  const spec: VerifierSpec = {
+    id: "escreve",
+    run: ["/bin/sh", "-c", "echo gerado > src/api/gerado.txt"],
+    extract: { kind: "exit-code" },
+    watch: ["src/web/**"],
+    timeout_s: 60,
+  };
+
+  const sandboxReal = (): SandboxStatus => ({
+    mode: "ai-jail",
+    detail: "binario real",
+    jail_bin: JAIL!,
+    jail_version: "real",
+  });
+
+  test("um .ai-jail hostil no projeto nao aperta a corrida do verificador", () => {
+    const { layout } = projetoForaDoTmp();
+    writeFileSync(join(layout.root, ".ai-jail"), "lockdown = true\n");
+
+    const { record } = runVerifier({ layout, spec, phase: "f", attempt: 1, sandbox: sandboxReal() });
+
+    // Sem `--clean`, o lockdown do arquivo deixaria a arvore somente leitura e
+    // o `echo` morreria com "Read-only file system".
+    expect(record.status).toBe("ok");
+    expect(record.exit_code).toBe(0);
+    expect(ler(layout, "src/api/gerado.txt")).toBe("gerado\n");
+  });
+
+  test("o verificador nao deixa .ai-jail para tras, nem reescreve o que existe", () => {
+    const { layout } = projetoForaDoTmp();
+    const alvo = join(layout.root, ".ai-jail");
+
+    runVerifier({ layout, spec, phase: "f", attempt: 1, sandbox: sandboxReal() });
+    expect(existsSync(alvo)).toBe(false);
+
+    writeFileSync(alvo, "lockdown = true\n");
+    runVerifier({ layout, spec, phase: "f", attempt: 2, sandbox: sandboxReal() });
+    expect(readFileSync(alvo, "utf8")).toBe("lockdown = true\n");
+  });
+});
+
+/**
+ * Campo 01, achado 1: a invariante que o bug violava.
+ *
+ *   sandbox(corrida atual) nao depende de sandbox(corrida anterior)
+ *
+ * Aqui a rede e medida de verdade, porque era exatamente a capacidade que
+ * chegava atrasada uma corrida. `curl` sem rede morre com 6 (host nao resolve) e
+ * com rede alcanca o endpoint. O teste nao olha o corpo da resposta, so se o
+ * processo chegou la, entao nao depende de status HTTP nem de credencial.
+ *
+ * Depende de internet, e por isso se declara `skip` quando ela nao existe:
+ * passar sem exercitar seria pior do que nao existir.
+ */
+const CURL = "/usr/bin/curl";
+const ALVO_HTTP = "https://example.com";
+const INTERNET_OK = (() => {
+  if (!existsSync(CURL)) return false;
+  return spawnSync(CURL, ["-sS", "-m", "8", "-o", "/dev/null", ALVO_HTTP]).status === 0;
+})();
+
+describe.skipIf(!JAIL_OK || !INTERNET_OK)("a rede da corrida nao depende da corrida anterior", () => {
+  const sandboxReal = (): SandboxStatus => ({
+    mode: "ai-jail",
+    detail: "binario real",
+    jail_bin: JAIL!,
+    jail_version: "real",
+  });
+
+  function specCurl(id: string, network: boolean): VerifierSpec {
+    return {
+      id,
+      run: [CURL, "-sS", "-m", "15", "-o", "/dev/null", ALVO_HTTP],
+      extract: { kind: "exit-code" },
+      watch: ["src/web/**"],
+      timeout_s: 60,
+      network,
+    };
+  }
+
+  /** Devolve o codigo de saida do curl dentro da jaula. */
+  function corrida(layout: Layout, id: string, network: boolean, attempt: number): number | null {
+    const { record } = runVerifier({
+      layout,
+      spec: specCurl(id, network),
+      phase: "f",
+      attempt,
+      sandbox: sandboxReal(),
+    });
+    return record.exit_code;
+  }
+
+  test("sem rede primeiro, com rede depois: a segunda alcanca a rede", () => {
+    const { layout } = projetoForaDoTmp();
+    expect(corrida(layout, "sem-rede", false, 1)).not.toBe(0);
+    expect(corrida(layout, "com-rede", true, 2)).toBe(0);
+  });
+
+  test("com rede primeiro, sem rede depois: a terceira ainda alcanca a rede", () => {
+    const { layout } = projetoForaDoTmp();
+    expect(corrida(layout, "com-rede", true, 1)).toBe(0);
+    expect(corrida(layout, "sem-rede", false, 2)).not.toBe(0);
+    expect(corrida(layout, "com-rede", true, 3)).toBe(0);
+  });
+
+  test("o resultado de uma corrida com rede e o mesmo em qualquer ordem", () => {
+    const depoisDeSemRede = (() => {
+      const { layout } = projetoForaDoTmp();
+      corrida(layout, "sem-rede", false, 1);
+      return corrida(layout, "com-rede", true, 2);
+    })();
+    const semPredecessor = (() => {
+      const { layout } = projetoForaDoTmp();
+      return corrida(layout, "com-rede", true, 1);
+    })();
+    expect(depoisDeSemRede).toBe(semPredecessor);
+    expect(depoisDeSemRede).toBe(0);
   });
 });

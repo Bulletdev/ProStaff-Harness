@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://prostaff.dev/schemas/psh-memory-consolidation-v1.json",
+  "title": "marca d'agua da consolidacao de memoria (R5.2)",
+  "type": "object",
+  "required": ["_type", "version", "last_seq", "last_slug", "updated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "_type": { "const": "psh-memory-consolidation" },
+    "version": { "const": 1 },
+    "last_seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Ultima entrada da trilha ja consolidada. A proxima consolidacao comeca em last_seq + 1."
+    },
+    "last_slug": {
+      "type": ["string", "null"],
+      "description": "Pagina gerada pela ultima consolidacao, ou null quando nunca houve uma."
+    },
+    "updated_at": { "type": "string", "minLength": 1 }
+  }
+}

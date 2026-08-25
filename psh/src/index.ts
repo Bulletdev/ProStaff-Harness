@@ -6,7 +6,7 @@ import { EXIT, PshError, type ExitCode } from "./util/errors.ts";
 import { writeJsonAtomic } from "./util/json.ts";
 import { sha256 } from "./util/hash.ts";
 import { selfArgv } from "./util/self.ts";
-import { flagBool, flagString, parseArgs, rejectUnknownFlags, type ParsedArgs } from "./cli/args.ts";
+import { flagBool, flagInt, flagString, parseArgs, rejectUnknownFlags, type ParsedArgs } from "./cli/args.ts";
 import { io } from "./cli/io.ts";
 import { openProject } from "./cli/context.ts";
 import { applyPlan, buildPlan, detectStack, ensureNotNested, renderPlan } from "./cli/init.ts";
@@ -15,7 +15,31 @@ import { buildStatus, renderStatus } from "./cli/status.ts";
 import { renderDoctor, runDoctor } from "./cli/doctor.ts";
 import { runSpecCoverage } from "./cli/spec-coverage.ts";
 import { renderCi, runCi } from "./adapters/ci.ts";
+import { conferirContrato, renderContrato } from "./adapters/claude-code/contract.ts";
+import { handleHook } from "./adapters/claude-code/hook.ts";
+import {
+  desinstalar,
+  instalar,
+  renderInstalacao,
+  renderStatusDoAdapter,
+  statusDoAdapter,
+} from "./adapters/claude-code/install.ts";
 import { addWriteGlob, boundaryOf, checkPath, renderBoundaryList, renderExec, runExec } from "./cli/boundary.ts";
+import {
+  consolidate as consolidateMemory,
+  get as getMemoryPage,
+  list as listMemory,
+  promote as promoteMemoryPage,
+  remember,
+  renderConsolidate as renderMemoryConsolidate,
+  renderList as renderMemoryList,
+  renderPage as renderMemoryPage,
+  renderSearch as renderMemorySearch,
+  search as searchMemoryPages,
+} from "./cli/memory.ts";
+import { syncIndex as syncMemoryIndex } from "./memory/search.ts";
+import { buildHandoff, renderHandoff } from "./memory/handoff.ts";
+import type { PageKind } from "./memory/page.ts";
 import { advance } from "./workflow/advance.ts";
 import { approvalPath, assertNoForgedMetrics, type ApprovalRecord } from "./gate/evaluate.ts";
 import { DENY_ALWAYS } from "./boundary/policy.ts";
@@ -28,11 +52,17 @@ const USAGE = `psh ${PSH_VERSION} - ProStaff Harness (nucleo verificavel)
   psh verify    [<verificador>...] [--all] [--json]
   psh advance   [--force] [--reason <texto>] [--yes] [--json]
   psh approve   <assunto> [--as <nome>]
-  psh audit     verify|log [-n <N>] [--json]
+  psh audit     verify|log [--n <N>] [--json]
+  psh audit     reanchor --reason <motivo> [--as <quem>] [--json]
   psh doctor    [--json]
   psh boundary  list|check <caminho>|add <agente> <glob> [--agent <id>] [--json]
   psh exec      --agent <id> [--timeout <s>] -- <comando...>
+  psh remember  "<fato>" [--title <texto>] [--tags a,b] [--kind <tipo>]
+  psh memory    list|search <consulta>|get <slug>|promote <slug>|consolidate|reindex
+                [--pinned] [--n <N>] [--to <arquivo>] [--force] [--json]
+  psh handoff   [--json] [--n <N>]
   psh adapter   ci [--json] [--gate-only] [--skip-verify]
+  psh adapter   claude-code install|uninstall|status|contract|hook [--json] [--dry-run]
   psh internal  spec-coverage --spec <arquivo> --tasks <glob> [--out <arquivo>]
 
 Valor de portao vem sempre de registro de evidencia produzido por 'psh verify'.
@@ -75,8 +105,14 @@ export async function main(argv: string[]): Promise<ExitCode> {
       return cmdBoundary(args);
     case "exec":
       return cmdExec(args);
+    case "remember":
+      return cmdRemember(args);
+    case "memory":
+      return cmdMemory(args);
+    case "handoff":
+      return cmdHandoff(args);
     case "adapter":
-      return cmdAdapter(args);
+      return await cmdAdapter(args);
     case "internal":
       return cmdInternal(args);
     default:
@@ -233,7 +269,7 @@ function cmdApprove(args: ParsedArgs): ExitCode {
 }
 
 function cmdAudit(args: ParsedArgs): ExitCode {
-  rejectUnknownFlags(args, ["json", "n", "root"], "audit");
+  rejectUnknownFlags(args, ["json", "n", "root", "reason", "as"], "audit");
   const sub = args.positional[0] ?? "verify";
   const ctx = openProject(flagString(args, "root") ?? undefined);
   try {
@@ -253,7 +289,7 @@ function cmdAudit(args: ParsedArgs): ExitCode {
       return result.ok ? EXIT.OK : EXIT.AUDIT_BROKEN;
     }
     if (sub === "log") {
-      const limit = Number(flagString(args, "n") ?? "20");
+      const limit = flagInt(args, "n", 20);
       const entries = ctx.chain.read().slice(-limit);
       if (flagBool(args, "json")) {
         io().out(`${JSON.stringify(entries, null, 2)}\n`);
@@ -264,7 +300,36 @@ function cmdAudit(args: ParsedArgs): ExitCode {
       }
       return EXIT.OK;
     }
-    throw new PshError(`subcomando desconhecido: psh audit ${sub}. Use 'verify' ou 'log'.`, {
+    if (sub === "reanchor") {
+      // O motivo e obrigatorio de propria natureza: reancorar e admitir que a
+      // trilha e a ancora discordaram, e o valor do comando esta em deixar
+      // escrito por que se decidiu seguir a partir do arquivo, e nao em
+      // silenciar o alarme.
+      const reason = flagString(args, "reason");
+      if (reason === null || reason.trim() === "") {
+        throw new PshError(
+          "uso: psh audit reanchor --reason \"por que a trilha e a ancora divergiram e por que seguir a partir do arquivo atual\"",
+          { exitCode: EXIT.FAILURE },
+        );
+      }
+      const antes = ctx.chain.verify();
+      const quem = flagString(args, "as") ?? process.env.USER ?? "human";
+      const { entry, anchorBefore } = ctx.chain.reanchor(reason, `human:${quem}`);
+      const depois = ctx.chain.verify();
+      if (flagBool(args, "json")) {
+        io().out(`${JSON.stringify({ reanchored: true, reason, by: quem, entry, before: antes, after: depois }, null, 2)}\n`);
+      } else {
+        io().out(
+          `reancorada por ${quem}: a ancora dizia ${anchorBefore?.count ?? 0} entrada(s) com topo ${anchorBefore?.head_hash ?? "-"}, ` +
+            `e o arquivo tinha ${antes.entries}.\n` +
+            `A divergencia ficou registrada na trilha como entrada ${entry.seq} (audit.note), com o motivo.\n` +
+            `motivo: ${reason}\n` +
+            `${depois.ok ? "cadeia integra" : "CADEIA AINDA COMPROMETIDA"}: ${depois.entries} entradas, topo ${depois.head_hash}\n`,
+        );
+      }
+      return depois.ok ? EXIT.OK : EXIT.AUDIT_BROKEN;
+    }
+    throw new PshError(`subcomando desconhecido: psh audit ${sub}. Use 'verify', 'log' ou 'reanchor'.`, {
       exitCode: EXIT.FAILURE,
     });
   } finally {
@@ -366,10 +431,143 @@ function cmdExec(args: ParsedArgs): ExitCode {
   }
 }
 
-function cmdAdapter(args: ParsedArgs): ExitCode {
+function cmdRemember(args: ParsedArgs): ExitCode {
+  rejectUnknownFlags(args, ["title", "tags", "kind", "json", "root"], "remember");
+  const fato = args.positional.join(" ").trim();
+  if (fato === "") {
+    throw new PshError('uso: psh remember "<fato>"', { exitCode: EXIT.FAILURE });
+  }
+  const ctx = openProject(flagString(args, "root") ?? undefined);
+  try {
+    const kind = flagString(args, "kind") ?? "fact";
+    if (!MEMORY_KINDS.includes(kind)) {
+      throw new PshError(`tipo de memoria desconhecido: ${kind}. Use ${MEMORY_KINDS.join(", ")}.`, {
+        exitCode: EXIT.CONTRACT_INVALID,
+      });
+    }
+    const stored = remember(ctx, {
+      fact: fato,
+      title: flagString(args, "title") ?? undefined,
+      tags: parseTagList(flagString(args, "tags")),
+      kind: kind as PageKind,
+    });
+    io().out(
+      flagBool(args, "json")
+        ? `${JSON.stringify({ slug: stored.page.slug, path: stored.path, content_sha256: stored.content_sha256 }, null, 2)}\n`
+        : `anotado e fixado: ${stored.page.slug}\n  ${stored.path}\n`,
+    );
+    return EXIT.OK;
+  } finally {
+    ctx.close();
+  }
+}
+
+const MEMORY_KINDS = ["fact", "decision", "verifier", "session", "prompt", "note"];
+
+function parseTagList(raw: string | null): string[] {
+  if (raw === null) return [];
+  return raw
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t !== "");
+}
+
+function cmdMemory(args: ParsedArgs): ExitCode {
+  rejectUnknownFlags(args, ["json", "root", "n", "pinned", "to", "force", "dry-run"], "memory");
+  const sub = args.positional[0] ?? "list";
+  const ctx = openProject(flagString(args, "root") ?? undefined);
+  try {
+    const json = flagBool(args, "json");
+
+    if (sub === "list") {
+      const result = listMemory(ctx, {
+        pinnedOnly: flagBool(args, "pinned"),
+        limit: flagInt(args, "n", 100),
+      });
+      io().out(json ? `${JSON.stringify(result, null, 2)}\n` : `${renderMemoryList(result)}\n`);
+      return EXIT.OK;
+    }
+
+    if (sub === "search") {
+      const consulta = args.positional.slice(1).join(" ").trim();
+      if (consulta === "") throw new PshError("uso: psh memory search <consulta>", { exitCode: EXIT.FAILURE });
+      const result = searchMemoryPages(ctx, consulta, flagInt(args, "n", 10));
+      io().out(json ? `${JSON.stringify(result, null, 2)}\n` : `${renderMemorySearch(result)}\n`);
+      // Busca sem resultado nao e erro: e resposta.
+      return EXIT.OK;
+    }
+
+    if (sub === "get") {
+      const slug = args.positional[1];
+      if (slug === undefined) throw new PshError("uso: psh memory get <slug>", { exitCode: EXIT.FAILURE });
+      const stored = getMemoryPage(ctx, slug);
+      io().out(
+        json
+          ? `${JSON.stringify({ ...stored.page, path: stored.path, content_sha256: stored.content_sha256 }, null, 2)}\n`
+          : `${renderMemoryPage(stored)}\n`,
+      );
+      return EXIT.OK;
+    }
+
+    if (sub === "promote") {
+      const slug = args.positional[1];
+      if (slug === undefined) throw new PshError("uso: psh memory promote <slug> [--to <arquivo>]", { exitCode: EXIT.FAILURE });
+      const result = promoteMemoryPage(ctx, slug, {
+        to: flagString(args, "to"),
+        force: flagBool(args, "force"),
+      });
+      io().out(
+        json
+          ? `${JSON.stringify(result, null, 2)}\n`
+          : `promovida: ${result.slug}\n  ${result.from} -> ${result.to} (${result.bytes} bytes)\n  a pagina continua existindo e agora aponta para o destino.\n`,
+      );
+      return EXIT.OK;
+    }
+
+    if (sub === "consolidate") {
+      const result = consolidateMemory(ctx, { dryRun: flagBool(args, "dry-run") });
+      io().out(json ? `${JSON.stringify(result, null, 2)}\n` : `${renderMemoryConsolidate(result)}\n`);
+      return EXIT.OK;
+    }
+
+    if (sub === "reindex") {
+      const sync = syncMemoryIndex(ctx.db, ctx.layout);
+      io().out(
+        json
+          ? `${JSON.stringify(sync, null, 2)}\n`
+          : `indice: ${sync.indexed} reindexada(s), ${sync.unchanged} inalterada(s), ${sync.removed} removida(s), ${sync.pages_examined} arquivo(s) examinado(s)\n`,
+      );
+      return sync.unreadable.length > 0 ? EXIT.FAILURE : EXIT.OK;
+    }
+
+    throw new PshError(
+      `subcomando desconhecido: psh memory ${sub}. Use list, search, get, promote, consolidate ou reindex.`,
+      { exitCode: EXIT.FAILURE },
+    );
+  } finally {
+    ctx.close();
+  }
+}
+
+function cmdHandoff(args: ParsedArgs): ExitCode {
+  rejectUnknownFlags(args, ["json", "root", "n"], "handoff");
+  const ctx = openProject(flagString(args, "root") ?? undefined);
+  try {
+    const handoff = buildHandoff(ctx, { limit: flagInt(args, "n", 5) });
+    io().out(
+      flagBool(args, "json") ? `${JSON.stringify(handoff, null, 2)}\n` : `${renderHandoff(handoff)}\n`,
+    );
+    return EXIT.OK;
+  } finally {
+    ctx.close();
+  }
+}
+
+async function cmdAdapter(args: ParsedArgs): Promise<ExitCode> {
   const sub = args.positional[0];
+  if (sub === "claude-code") return cmdAdapterClaudeCode(args);
   if (sub !== "ci") {
-    throw new PshError(`adapter desconhecido: ${sub ?? "(nenhum)"}. Disponivel na v0.1: ci`, {
+    throw new PshError(`adapter desconhecido: ${sub ?? "(nenhum)"}. Disponiveis: ci, claude-code`, {
       exitCode: EXIT.FAILURE,
     });
   }
@@ -388,6 +586,106 @@ function cmdAdapter(args: ParsedArgs): ExitCode {
   } finally {
     ctx.close();
   }
+}
+
+/**
+ * R8.2: o adapter do Claude Code.
+ *
+ * `hook` e o ponto que o runtime chama; os outros sao para o humano.
+ */
+async function cmdAdapterClaudeCode(args: ParsedArgs): Promise<ExitCode> {
+  rejectUnknownFlags(args, ["json", "root", "dry-run", "timeout"], "adapter claude-code");
+  const acao = args.positional[1] ?? "status";
+  const json = flagBool(args, "json");
+
+  if (acao === "hook") return await cmdHook(args);
+
+  if (acao === "contract") {
+    const relatorio = conferirContrato();
+    io().out(json ? `${JSON.stringify(relatorio, null, 2)}\n` : `${renderContrato(relatorio)}\n`);
+    return relatorio.ok ? EXIT.OK : EXIT.CONTRACT_INVALID;
+  }
+
+  const ctx = openProject(flagString(args, "root") ?? undefined);
+  try {
+    if (acao === "install") {
+      const r = instalar(ctx.layout, {
+        selfArgv: selfArgv(),
+        timeout_s: flagString(args, "timeout") === null ? undefined : flagInt(args, "timeout", 30),
+        dryRun: flagBool(args, "dry-run"),
+      });
+      io().out(json ? `${JSON.stringify(r, null, 2)}\n` : `${renderInstalacao(r)}\n`);
+      return EXIT.OK;
+    }
+    if (acao === "uninstall") {
+      const r = desinstalar(ctx.layout);
+      io().out(
+        json
+          ? `${JSON.stringify(r, null, 2)}\n`
+          : `${r.removidos} hook(s) do psh removido(s) de ${r.settings}; ${r.preservados} de terceiros preservado(s)\n`,
+      );
+      return EXIT.OK;
+    }
+    if (acao === "status") {
+      const s = statusDoAdapter(ctx.layout);
+      io().out(json ? `${JSON.stringify(s, null, 2)}\n` : `${renderStatusDoAdapter(s)}\n`);
+      return s.completo ? EXIT.OK : EXIT.FAILURE;
+    }
+    throw new PshError(
+      `acao desconhecida: psh adapter claude-code ${acao}. Use install, uninstall, status, contract ou hook.`,
+      { exitCode: EXIT.FAILURE },
+    );
+  } finally {
+    ctx.close();
+  }
+}
+
+/**
+ * O hook le o payload em stdin e devolve JSON em stdout.
+ *
+ * Falha aqui nunca derruba a sessao de quem esta trabalhando: o motivo vai para
+ * stderr, que o runtime mostra em modo verboso, e o codigo de saida e zero.
+ */
+async function cmdHook(args: ParsedArgs): Promise<ExitCode> {
+  const bruto = await lerStdin();
+  let payload: unknown = null;
+  try {
+    payload = bruto.trim() === "" ? null : JSON.parse(bruto);
+  } catch (cause) {
+    io().err(`psh hook: payload nao e JSON valido: ${(cause as Error).message}\n`);
+    return EXIT.OK;
+  }
+  const resultado = handleHook(payload);
+  if (resultado.output !== null) io().out(`${JSON.stringify(resultado.output)}\n`);
+  if (resultado.nota !== "") io().err(`psh hook: ${resultado.nota}\n`);
+  void args;
+  return resultado.exitCode as ExitCode;
+}
+
+/**
+ * Leitura de stdin por descritor, e nao pela API de stream.
+ *
+ * `Bun.stdin.stream()` falha com EPERM sob confinamento (o bun instalado por
+ * snap, por exemplo), e um hook que morre ao ler o proprio payload derruba a
+ * sessao de quem esta trabalhando. `readSync` no descritor 0 funciona nos dois
+ * casos e nao depende de nada alem do kernel.
+ */
+async function lerStdin(): Promise<string> {
+  const pedacos: Buffer[] = [];
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  for (;;) {
+    let lidos: number;
+    try {
+      lidos = readSync(0, buffer, 0, buffer.length, null);
+    } catch (cause) {
+      const erro = cause as NodeJS.ErrnoException;
+      if (erro.code === "EOF" || erro.code === "EAGAIN") break;
+      throw cause;
+    }
+    if (lidos <= 0) break;
+    pedacos.push(Buffer.from(buffer.subarray(0, lidos)));
+  }
+  return Buffer.concat(pedacos).toString("utf8");
 }
 
 function cmdInternal(args: ParsedArgs): ExitCode {

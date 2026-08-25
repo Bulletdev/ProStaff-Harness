@@ -262,6 +262,42 @@ describe("approve e audit pela CLI", () => {
     expect(r.code).toBe(EXIT.FAILURE);
     expect(r.err).toContain("subcomando desconhecido");
   });
+
+  /**
+   * Campo 01, achado 10. Trunca a trilha com o banco intacto, que e o unico
+   * estado onde a divergencia foi reproduzivel, e cobra o ciclo inteiro pela
+   * CLI: travado, diagnosticado, reancorado com motivo, destravado.
+   */
+  test("reanchor devolve um projeto travado por divergencia de ancora", async () => {
+    const layout = projeto();
+    await cli(["verify", "--root", layout.root]);
+    await cli(["advance", "--root", layout.root]);
+
+    const linhas = readFileSync(layout.chainPath, "utf8").split("\n").filter((l) => l.trim() !== "");
+    expect(linhas.length).toBeGreaterThan(1);
+    writeFileSync(layout.chainPath, `${linhas.slice(0, 1).join("\n")}\n`);
+
+    const travado = await cli(["approve", "brief.md", "--root", layout.root]);
+    expect(travado.code).not.toBe(EXIT.OK);
+    expect(travado.err).toContain("reanchor");
+
+    const semMotivo = await cli(["audit", "reanchor", "--root", layout.root]);
+    expect(semMotivo.code).toBe(EXIT.FAILURE);
+    expect(semMotivo.err).toContain("--reason");
+
+    const r = await cli([
+      "audit", "reanchor", "--reason", "trilha truncada na restauracao do backup de ontem",
+      "--as", "michael", "--root", layout.root,
+    ]);
+    expect(r.code).toBe(EXIT.OK);
+    expect(r.out).toContain("michael");
+    expect(r.out).toContain("trilha truncada");
+
+    // Destravou, e o motivo ficou na trilha em vez de na memoria de quem rodou.
+    const depois = await cli(["approve", "brief.md", "--root", layout.root]);
+    expect(depois.code).toBe(EXIT.OK);
+    expect(readFileSync(layout.chainPath, "utf8")).toContain("trilha truncada na restauracao");
+  });
 });
 
 describe("doctor e internal pela CLI", () => {
@@ -345,6 +381,23 @@ describe("parser de argumento", () => {
   test("flag desconhecida lista as conhecidas", () => {
     const a = parseArgs(["--turbo"]);
     expect(() => rejectUnknownFlags(a, ["json", "root"], "verify")).toThrow(/--json/);
+  });
+
+  test("traco simples e recusado em vez de virar posicional ignorado", () => {
+    // 'psh audit log -n 5' respondia com o limite padrao e sem erro: o '-n' e o
+    // '5' viravam posicionais que ninguem lia.
+    expect(() => parseArgs(["log", "-n", "5"])).toThrow(PshError);
+    expect(() => parseArgs(["log", "-n", "5"])).toThrow(/--n/);
+  });
+
+  test("numero negativo e traco sozinho continuam sendo texto", () => {
+    expect(parseArgs(["-5"]).positional).toEqual(["-5"]);
+    expect(parseArgs(["-"]).positional).toEqual(["-"]);
+  });
+
+  test("depois de -- o traco simples volta a ser texto", () => {
+    const a = parseArgs(["exec", "--", "sh", "-c", "echo oi"]);
+    expect(a.positional).toEqual(["exec", "sh", "-c", "echo oi"]);
   });
 });
 

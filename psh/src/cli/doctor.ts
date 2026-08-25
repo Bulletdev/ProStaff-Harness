@@ -3,8 +3,11 @@ import { spawnSync } from "node:child_process";
 import { delimiter, isAbsolute, join } from "node:path";
 import type { ProjectContext } from "./context.ts";
 import { detectSandbox } from "../evidence/sandbox.ts";
-import { probeGit } from "../evidence/workspace.ts";
+import { isGitRepo, probeGit } from "../evidence/workspace.ts";
 import { defaultInstallDirs, loadBoundary } from "../boundary/policy.ts";
+import { syncIndex } from "../memory/search.ts";
+import { statusDoAdapter } from "../adapters/claude-code/install.ts";
+import { acharRuntime, CONTRATO } from "../adapters/claude-code/contract.ts";
 import { PSH_TOKEN } from "../util/self.ts";
 import { PSH_VERSION } from "../version.ts";
 
@@ -39,6 +42,8 @@ export function runDoctor(ctx: ProjectContext): DoctorReport {
   checks.push(checkAbsolutePaths(ctx));
   checks.push(checkSecrets(ctx));
   checks.push(checkEvidenceOwnership(ctx));
+  checks.push(...checkMemory(ctx));
+  checks.push(...checkAdapterClaudeCode(ctx));
 
   return {
     psh_version: PSH_VERSION,
@@ -336,7 +341,9 @@ function checkEnumeration(ctx: ProjectContext): Check {
   if (probe.available) {
     return { id: "workspace-enum", level: "ok", message: "enumeracao por git", detail: probe.detail };
   }
-  if (!existsSync(join(ctx.layout.root, ".git"))) {
+  // Mesma pergunta que a enumeracao faz, feita ao git e nao ao diretorio: um app
+  // dentro de repositorio maior nao tem `.git/` proprio e continua sob Git.
+  if (!isGitRepo(ctx.layout.root)) {
     return { id: "workspace-enum", level: "ok", message: "enumeracao por caminhada", detail: probe.detail };
   }
   return {
@@ -345,6 +352,104 @@ function checkEnumeration(ctx: ProjectContext): Check {
     message: "repositorio Git com git indisponivel: frescor cai para caminhada",
     detail: `${probe.detail} Arquivo ignorado pelo .gitignore passa a entrar no hash da arvore, e evidencia valida vira obsoleta sozinha.`,
   };
+}
+
+/**
+ * C5 ativo: o diagnostico diz por qual mecanismo a busca responde e o que ficou
+ * fora do indice.
+ *
+ * Busca que responde menos porque o SQLite veio sem FTS5, ou porque uma pagina
+ * esta corrompida, nao pode parecer busca que respondeu tudo (mesma regra do
+ * modo degradado do sandbox e da fronteira).
+ */
+function checkMemory(ctx: ProjectContext): Check[] {
+  const out: Check[] = [];
+  out.push(
+    ctx.db.ftsAvailable
+      ? { id: "memory-fts", level: "ok", message: "busca de memoria por FTS5" }
+      : {
+          id: "memory-fts",
+          level: "warn",
+          message: "MODO DEGRADADO: SQLite sem FTS5, busca por substring",
+          detail: `${ctx.db.ftsUnavailableReason ?? "modulo ausente"}. Sem ranking, sem prefixo e sem tolerancia a acento.`,
+        },
+  );
+
+  const sync = syncIndex(ctx.db, ctx.layout);
+  if (sync.unreadable.length > 0) {
+    out.push({
+      id: "memory-pages",
+      level: "fail",
+      message: `${sync.unreadable.length} pagina(s) de memoria ilegivel(is), fora do indice`,
+      detail: sync.unreadable.map((p) => `${p.slug}: ${p.message}`).join("; "),
+    });
+  } else if (sync.skipped.length > 0) {
+    out.push({
+      id: "memory-pages",
+      level: "warn",
+      message: `${sync.skipped.length} arquivo(s) em .harness/memory/pages/ ignorado(s) por nome invalido`,
+      detail: sync.skipped.join(", "),
+    });
+  } else {
+    out.push({
+      id: "memory-pages",
+      level: "ok",
+      message: `${sync.pages_examined} pagina(s) de memoria examinada(s), ${sync.indexed} reindexada(s)`,
+    });
+  }
+  return out;
+}
+
+/**
+ * R8.6c: adapter parcialmente carregado e falha visivel.
+ *
+ * O modo de falha mais caro do projeto e o silencioso: 881 linhas de plugin
+ * morto no harness de referencia, e os tres mecanismos do `prostaff-hooks` que
+ * nunca responderam. Aqui o diagnostico diz quantos pontos de extensao estao
+ * registrados de verdade, e contra qual versao do runtime o contrato passou.
+ */
+function checkAdapterClaudeCode(ctx: ProjectContext): Check[] {
+  const status = statusDoAdapter(ctx.layout);
+  if (!status.existe && status.registrados === 0) {
+    // Nao instalado nao e defeito: nem todo projeto usa este runtime.
+    return [
+      {
+        id: "adapter-claude-code",
+        level: "ok",
+        message: "adapter claude-code nao instalado neste projeto",
+        detail: "Instale com 'psh adapter claude-code install'.",
+      },
+    ];
+  }
+
+  const out: Check[] = [];
+  out.push(
+    status.completo
+      ? {
+          id: "adapter-claude-code",
+          level: "ok",
+          message: `adapter claude-code: ${status.registrados}/${status.esperados} pontos de extensao ativos`,
+        }
+      : {
+          id: "adapter-claude-code",
+          level: "fail",
+          message: `adapter claude-code carregado pela metade: ${status.registrados}/${status.esperados} pontos ativos, ${status.orfaos} orfao(s)`,
+          detail: `${status.pontos.filter((p) => !p.registrado).map((p) => p.evento).join(", ") || "-"} sem registro. Rode 'psh adapter claude-code install'.`,
+        },
+  );
+
+  const runtime = acharRuntime();
+  out.push({
+    id: "adapter-claude-code-runtime",
+    level: runtime.encontrado ? "ok" : "warn",
+    message: runtime.encontrado
+      ? `runtime ${runtime.versao ?? "?"}; contrato conferido contra ${CONTRATO.verified_against.version}`
+      : "runtime claude-code nao encontrado; o contrato nao pode ser conferido aqui",
+    detail: runtime.encontrado
+      ? "Confira simbolo a simbolo com 'psh adapter claude-code contract'."
+      : runtime.detalhe,
+  });
+  return out;
 }
 
 function checkEvidenceOwnership(ctx: ProjectContext): Check {

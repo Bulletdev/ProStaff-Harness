@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://prostaff.dev/schemas/psh-memory-page-v1.json",
+  "title": "psh memory page (faixa transitoria, nao canonica - R5.7)",
+  "type": "object",
+  "required": ["_type", "version", "slug", "kind", "title", "pinned", "source", "created_at", "updated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "_type": { "const": "psh-memory-page" },
+    "version": { "const": 1 },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+      "maxLength": 96,
+      "description": "Nome do arquivo em .harness/memory/pages/. Restrito a minuscula, digito e hifen: o slug vira caminho e nao pode carregar separador, '..' nem espaco."
+    },
+    "kind": {
+      "enum": ["fact", "decision", "verifier", "session", "prompt", "note"],
+      "description": "R5.1: as origens de captura. 'fact' e o que entra por 'psh remember'."
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "pinned": {
+      "type": "boolean",
+      "description": "R5.5: pagina fixada nao pode ser perdida na consolidacao."
+    },
+    "phase": { "type": ["string", "null"] },
+    "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Quem originou: 'human:<nome>', 'core' ou o id do agente."
+    },
+    "created_at": { "type": "string", "minLength": 1 },
+    "updated_at": { "type": "string", "minLength": 1 },
+    "promoted_to": {
+      "type": ["string", "null"],
+      "description": "R5.7: caminho no repositorio para onde a pagina foi promovida. Preenchido, a pagina deixou de ser a versao que vale."
+    }
+  }
+}

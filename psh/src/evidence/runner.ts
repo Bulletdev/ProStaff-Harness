@@ -164,7 +164,7 @@ export function runVerifier(opts: RunVerifierOptions): RunVerifierResult {
     manifest: relToProject(layout, slot.manifestPath),
     stdout: run.stdout,
     stderr: run.stderr,
-    manifestFiles: after.files,
+    workspace: after,
     layout,
     slot,
   };
@@ -343,7 +343,7 @@ interface FinishArgs {
   manifest: string | null;
   stdout: string;
   stderr: string;
-  manifestFiles?: Record<string, string>;
+  workspace?: WorkspaceManifest;
   error: { reason: EvidenceErrorReason; message: string } | null;
   layout: Layout;
   slot: EvidenceSlot;
@@ -371,7 +371,7 @@ function finish(args: FinishArgs): EvidenceRecord {
     candidates_examined: args.candidates_examined,
     enumeration: args.enumeration,
     artifact: args.artifact,
-    manifest: args.manifestFiles === undefined ? null : args.manifest,
+    manifest: args.workspace === undefined ? null : args.manifest,
     stdout_sha256: `sha256:${sha256(args.stdout)}`,
     stderr_sha256: `sha256:${sha256(args.stderr)}`,
     sandbox: args.sandbox,
@@ -381,6 +381,6 @@ function finish(args: FinishArgs): EvidenceRecord {
   return writeEvidence(args.layout, args.slot, record, {
     stdout: args.stdout,
     stderr: args.stderr,
-    manifestFiles: args.manifestFiles ?? null,
+    workspace: args.workspace ?? null,
   });
 }

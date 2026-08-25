@@ -174,3 +174,135 @@ describe("trilha encadeada por hash (R4.1, R4.2)", () => {
     db.close();
   });
 });
+
+describe("nao se escreve em cima de trilha adulterada", () => {
+  test("append recusa quando o arquivo nao bate com a ancora", () => {
+    const { layout, db, chain } = chainWithAnchor();
+    seed(chain, 3);
+
+    // Some com a ultima linha: a cadeia continua internamente consistente, e e
+    // exatamente por isso que a ancora existe.
+    const linhas = lines(layout.chainPath);
+    writeFileSync(layout.chainPath, `${linhas.slice(0, -1).join("\n")}\n`);
+
+    expect(() => chain.append("audit.note", "core:psh", {})).toThrow(AuditError);
+    expect(() => chain.append("audit.note", "core:psh", {})).toThrow(/ancora/);
+    db.close();
+  });
+
+  test("sem a recusa, uma escrita qualquer apagaria o estrago do relatorio", () => {
+    const { layout, db, chain } = chainWithAnchor();
+    seed(chain, 3);
+    writeFileSync(layout.chainPath, `${lines(layout.chainPath).slice(0, -1).join("\n")}\n`);
+
+    // O `append` regrava a ancora com o topo novo. Se ele nao conferisse antes,
+    // a cadeia voltaria a fechar e `verify` diria "integra" para uma trilha de
+    // onde uma entrada foi removida.
+    expect(chain.verify().ok).toBe(false);
+    try {
+      chain.append("audit.note", "core:psh", {});
+    } catch {
+      /* esperado */
+    }
+    expect(chain.verify().ok).toBe(false);
+    db.close();
+  });
+
+  test("trilha intacta continua aceitando escrita", () => {
+    const { db, chain } = chainWithAnchor();
+    seed(chain, 2);
+    expect(() => chain.append("audit.note", "core:psh", {})).not.toThrow();
+    expect(chain.verify().ok).toBe(true);
+    db.close();
+  });
+
+  test("a recusa diz como sair, nao so que travou", () => {
+    const { layout, db, chain } = chainWithAnchor();
+    seed(chain, 3);
+    writeFileSync(layout.chainPath, `${lines(layout.chainPath).slice(0, -1).join("\n")}\n`);
+
+    // Travar sem saida deixa uma alternativa real so: apagar o `.harness` na
+    // mao, que e como a evidencia de adulteracao desaparece.
+    expect(() => chain.append("audit.note", "core:psh", {})).toThrow(/reanchor/);
+    db.close();
+  });
+});
+
+/**
+ * Campo 01, achado 10: a protecao funcionava e nao tinha caminho de volta.
+ *
+ * Reancorar nao conserta a trilha nem finge que a divergencia nao houve. Ele
+ * grava na propria trilha o que a ancora dizia, o que o arquivo diz e por que se
+ * decidiu seguir, e so entao move a ancora. Divergencia vira cicatriz legivel em
+ * vez de diretorio apagado no susto.
+ */
+describe("reancoragem e decisao humana registrada, nao conserto silencioso", () => {
+  /** Trunca a trilha mantendo o banco intacto: o estado do campo, reproduzido. */
+  function divergir(layout: { chainPath: string }, manter: number): void {
+    writeFileSync(layout.chainPath, `${lines(layout.chainPath).slice(0, manter).join("\n")}\n`);
+  }
+
+  test("destrava o projeto e deixa a divergencia escrita na trilha", () => {
+    const { layout, db, chain } = chainWithAnchor();
+    seed(chain, 5);
+    divergir(layout, 2);
+    expect(chain.verify().ok).toBe(false);
+
+    const { entry, anchorBefore } = chain.reanchor("trilha truncada por restauracao de backup", "human:mike");
+
+    expect(anchorBefore?.count).toBe(5);
+    expect(entry.type).toBe("audit.note");
+    expect(entry.payload.reason).toBe("trilha truncada por restauracao de backup");
+    expect(entry.payload.anchor_before).toEqual({ count: 5, head_hash: anchorBefore!.head_hash });
+    expect(entry.payload.file_at_reanchor).toMatchObject({ count: 2 });
+
+    // Destravou de verdade, e o registro da divergencia ficou.
+    expect(chain.verify().ok).toBe(true);
+    expect(() => chain.append("audit.note", "core:psh", {})).not.toThrow();
+    expect(chain.read().some((e) => e.payload.note === "reancoragem da trilha por decisao humana")).toBe(true);
+    db.close();
+  });
+
+  test("sem motivo escrito nao reancora", () => {
+    const { layout, db, chain } = chainWithAnchor();
+    seed(chain, 3);
+    divergir(layout, 1);
+
+    expect(() => chain.reanchor("", "human:mike")).toThrow(AuditError);
+    expect(() => chain.reanchor("   ", "human:mike")).toThrow(/motivo/);
+    expect(chain.verify().ok).toBe(false);
+    db.close();
+  });
+
+  test("recusa quando o defeito esta dentro do arquivo, porque mover a ancora nao conserta isso", () => {
+    const { layout, db, chain } = chainWithAnchor();
+    seed(chain, 3);
+
+    // Edicao de payload no meio: a linha deixa de fechar com o proprio hash.
+    const linhas = lines(layout.chainPath);
+    const adulterada = JSON.parse(linhas[1]!) as { payload: Record<string, unknown> };
+    adulterada.payload = { i: 999 };
+    linhas[1] = canonicalJson(adulterada);
+    writeFileSync(layout.chainPath, `${linhas.join("\n")}\n`);
+
+    expect(() => chain.reanchor("quero destravar", "human:mike")).toThrow(/nao conserta/);
+    expect(chain.verify().ok).toBe(false);
+    db.close();
+  });
+
+  test("a entrada de reancoragem encadeia no topo real e nao apaga o que sobrou", () => {
+    const { layout, db, chain } = chainWithAnchor();
+    seed(chain, 4);
+    const antes = chain.read();
+    divergir(layout, 2);
+
+    const { entry } = chain.reanchor("disco cheio truncou a trilha", "human:mike");
+    const depois = chain.read();
+
+    expect(depois).toHaveLength(3);
+    expect(depois.slice(0, 2)).toEqual(antes.slice(0, 2));
+    expect(entry.prev_hash).toBe(antes[1]!.hash);
+    expect(entry.seq).toBe(3);
+    db.close();
+  });
+});

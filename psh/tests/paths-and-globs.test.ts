@@ -1,10 +1,18 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { GIT_AVAILABLE } from "./helpers.ts";
 import { compileGlobs, normalizeRel } from "../src/util/globs.ts";
 import { diffManifests, hashWorkspace, probeGit } from "../src/evidence/workspace.ts";
-import { isInside, toRel } from "../src/util/paths.ts";
+import {
+  HARNESS_OBSERVABLE_PATHS,
+  HARNESS_RUNTIME_PATHS,
+  isInside,
+  layoutFor,
+  toRel,
+} from "../src/util/paths.ts";
 import { ContractError } from "../src/util/errors.ts";
 import { jsonPointer } from "../src/util/json.ts";
 
@@ -112,6 +120,36 @@ describe("enumeracao da arvore observada e declarada (R2.4)", () => {
     expect(probe.detail).toContain("nao e repositorio Git");
   });
 
+  /**
+   * Campo 01, achado 4.
+   *
+   * `isGitRepo` era `existsSync(join(root, ".git"))`, que so acerta o projeto que
+   * e a raiz do repositorio. Qualquer app dentro de um repositorio maior, que e o
+   * layout de monorepo e foi o caso da cobaia, caia para caminhada: o `.gitignore`
+   * parava de valer para o hash da arvore e entravam nele o `.env` com chave real,
+   * o diretorio de relatorio e um binario de node vendorizado de 100 MB.
+   *
+   * O `psh doctor` ainda chamava isso de `[ok] enumeracao por caminhada`, com o
+   * detalhe "projeto nao e repositorio Git", enquanto o `checkSecrets` do mesmo
+   * doctor usava `git ls-files` no mesmo diretorio sem problema nenhum.
+   */
+  test.skipIf(!GIT_AVAILABLE)("app dentro de repositorio maior continua sob Git", () => {
+    const repo = hostileDir();
+    spawnSync("git", ["init", "-q", "."], { cwd: repo });
+    const app = join(repo, "apps", "web");
+    mkdirSync(join(app, "src"), { recursive: true });
+    writeFileSync(join(repo, ".gitignore"), ".env\n");
+    writeFileSync(join(app, "src", "a.ts"), "x\n");
+    writeFileSync(join(app, ".env"), "OPENAI_API_KEY=sk-real\n");
+
+    // Sem `.git/` proprio, e ainda assim um projeto sob Git.
+    expect(existsSync(join(app, ".git"))).toBe(false);
+    const manifest = hashWorkspace(app, { watch: ["**"] });
+    expect(manifest.enumeration).toBe("git");
+    expect(Object.keys(manifest.files)).toEqual(["src/a.ts"]);
+    expect(probeGit(app).available).toBe(true);
+  });
+
   test("com .git presente mas git inutilizavel, o modo vira walk-fallback em vez de mentir", () => {
     const root = hostileDir();
     writeFileSync(join(root, "src", "a.ts"), "x\n");
@@ -148,6 +186,90 @@ describe("enumeracao da arvore observada e declarada (R2.4)", () => {
     expect(chaves).toContain("src/a.ts");
     expect(chaves.some((k) => k.startsWith(".harness/evidence/"))).toBe(false);
     expect(chaves).not.toContain(".harness/state.json");
+  });
+
+  /**
+   * Campo 01, residuo do achado 2.
+   *
+   * A lista de exclusao cobria quatro caminhos enquanto o `Layout` ja tinha sete
+   * diretorios de runtime, entao `memory/`, `approvals/`, `reviews/` e `tmp/`
+   * entravam no hash. O efeito medido na cobaia: um `psh memory consolidate`
+   * entre a medicao e o portao derrubava a evidencia de um verificador que
+   * observa `**`, citando arquivo que nenhum verificador escreveu. E o `secrets`
+   * que vem no `common.json` observa exatamente `**`.
+   *
+   * Num projeto Git o `.harness/.gitignore` mascarava parte disso. Fora do Git,
+   * ou num app dentro de repositorio maior, aparecia inteiro.
+   */
+  test("operacao do proprio harness nao derruba evidencia de quem observa **", () => {
+    const root = hostileDir();
+    writeFileSync(join(root, "src", "a.ts"), "x\n");
+    for (const sub of ["evidence", "audit", "memory/pages", "approvals", "reviews", "tmp"]) {
+      mkdirSync(join(root, ".harness", ...sub.split("/")), { recursive: true });
+    }
+    const antes = hashWorkspace(root, { watch: ["**"] });
+
+    // Tudo o que o nucleo escreve enquanto opera, de uma vez.
+    writeFileSync(join(root, ".harness", "state.json"), '{"attempt":2}\n');
+    writeFileSync(join(root, ".harness", "harness.db-wal"), "wal\n");
+    writeFileSync(join(root, ".harness", "memory", "consolidation.json"), "{}\n");
+    writeFileSync(join(root, ".harness", "memory", "pages", "sessao-0001.md"), "# pagina\n");
+    writeFileSync(join(root, ".harness", "approvals", "abc.json"), "{}\n");
+    writeFileSync(join(root, ".harness", "reviews", "r1.json"), "{}\n");
+    writeFileSync(join(root, ".harness", "tmp", "boundary-1-x"), "rascunho\n");
+    writeFileSync(join(root, ".harness", "audit", "chain.jsonl"), "{}\n");
+    writeFileSync(join(root, ".harness", "evidence", "tudo.json"), "{}\n");
+
+    expect(hashWorkspace(root, { watch: ["**"] }).hash).toBe(antes.hash);
+  });
+
+  test("contrato e documento de fase continuam observaveis dentro do .harness", () => {
+    const root = hostileDir();
+    writeFileSync(join(root, "src", "a.ts"), "x\n");
+    mkdirSync(join(root, ".harness", "sprints"), { recursive: true });
+    writeFileSync(join(root, ".harness", "workflow.json"), "{}\n");
+    writeFileSync(join(root, ".harness", "SPEC.md"), "# spec\n");
+    writeFileSync(join(root, ".harness", "sprints", "s1.md"), "# sprint\n");
+    const antes = hashWorkspace(root, { watch: ["**"] });
+
+    // Esconder isto seria pior que o bug: e material de portao.
+    writeFileSync(join(root, ".harness", "SPEC.md"), "# spec editada\n");
+    expect(hashWorkspace(root, { watch: ["**"] }).hash).not.toBe(antes.hash);
+  });
+
+  test("a exclusao aparece no manifesto, contada e nomeada", () => {
+    const root = hostileDir();
+    writeFileSync(join(root, "src", "a.ts"), "x\n");
+    mkdirSync(join(root, ".harness", "memory"), { recursive: true });
+    writeFileSync(join(root, ".harness", "memory", "consolidation.json"), "{}\n");
+    writeFileSync(join(root, ".harness", "state.json"), "{}\n");
+
+    // Exclusao silenciosa e como um arquivo deixa de ser visto sem ninguem
+    // perceber. Ela decide medicao, entao mora no registro da medicao.
+    const manifest = hashWorkspace(root, { watch: ["**"] });
+    expect(manifest.harness_artifacts_skipped).toBe(2);
+    expect(manifest.harness_artifacts_excluded).toContain(".harness/memory/");
+  });
+
+  /**
+   * O defeito nao foi a lista estar errada, foi ela ter envelhecido calada
+   * enquanto o `Layout` crescia. Este teste e o que cobra a sincronia: qualquer
+   * caminho novo no `Layout` tem que ser classificado como artefato de runtime
+   * ou como observavel, e a escolha fica explicita em vez de omitida.
+   */
+  test("todo caminho do Layout esta classificado como runtime ou observavel", () => {
+    const layout = layoutFor("/proj");
+    const declarados = [...HARNESS_RUNTIME_PATHS, ...HARNESS_OBSERVABLE_PATHS];
+    const cobre = (prefixo: string, rel: string): boolean => {
+      const semBarra = prefixo.endsWith("/") ? prefixo.slice(0, -1) : prefixo;
+      return rel === prefixo || rel === semBarra || rel.startsWith(prefixo);
+    };
+    const naoClassificados = Object.entries(layout)
+      .filter(([chave]) => chave !== "root" && chave !== "harness")
+      .map(([, abs]) => toRel("/proj", abs))
+      .filter((rel) => !declarados.some((p) => cobre(p, rel)));
+
+    expect(naoClassificados).toEqual([]);
   });
 
   test("diff nomeia modificado, criado e removido separadamente", () => {
